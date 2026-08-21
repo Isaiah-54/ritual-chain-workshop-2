@@ -24,8 +24,8 @@ describe("RitualPredict", function () {
     }
 
     await client.request({
-      method: "hardhat_setCode",
-      params: [SCHEDULER, code],
+      method: "hardhat_setCode" as never,
+      params: [SCHEDULER, code] as never,
     });
 
     const [owner, alice, bob] = await viem.getWalletClients();
