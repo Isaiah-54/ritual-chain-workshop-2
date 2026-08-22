@@ -1,7 +1,8 @@
 "use client";
+function formatEther(value: bigint) { return (Number(value) / 1e18).toFixed(4); }
 
 import { useEffect, useState, useCallback } from "react";
-import { formatEther } from "viem";
+
 import {
   connectWallet,
   createMarket,
