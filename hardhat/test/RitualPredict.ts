@@ -12,7 +12,6 @@ describe("RitualPredict", function () {
     const { viem } = await hre.network.getOrCreate();
     const client = await viem.getPublicClient();
 
-
     // Deploy the mock scheduler and copy its runtime bytecode
     // to Ritual's canonical Scheduler address.
     const mock = await viem.deployContract("MockScheduler");
@@ -67,6 +66,7 @@ describe("RitualPredict", function () {
       bob,
     };
   }
+
   const market = {
     question: "Will ETH be above $3000?",
     oracleUrl: "https://example.com/price.json",
@@ -79,6 +79,91 @@ describe("RitualPredict", function () {
 
   async function expectRejected(fn: () => Promise<unknown>) {
     await assert.rejects(fn);
+  }
+
+  async function mineBlocks(client: any, n: bigint) {
+    if (n <= 0n) return;
+    await client.request({
+      method: "hardhat_mine" as never,
+      params: [`0x${n.toString(16)}`] as never,
+    });
+  }
+
+  async function execute(
+    scheduler: any,
+    client: any,
+    callId: bigint,
+    executionIndex: bigint,
+  ) {
+    const hash = await scheduler.write.execute([
+      callId,
+      executionIndex,
+    ]);
+
+    await client.waitForTransactionReceipt({
+      hash,
+    });
+
+    return hash;
+  }
+
+  async function installOracleMocks(
+    viem: any,
+    client: any,
+  ) {
+    const mockHttp = await viem.deployContract("MockHTTP");
+
+    const httpCode = await client.getCode({
+      address: mockHttp.address,
+    });
+
+    if (!httpCode) {
+      throw new Error("Mock HTTP has no runtime bytecode");
+    }
+
+    await client.request({
+      method: "hardhat_setCode" as never,
+      params: [
+        "0x0000000000000000000000000000000000000801",
+        httpCode,
+      ] as never,
+    });
+
+    const mockJq = await viem.deployContract("MockJQ");
+
+    const jqCode = await client.getCode({
+      address: mockJq.address,
+    });
+
+    if (!jqCode) {
+      throw new Error("Mock JQ has no runtime bytecode");
+    }
+
+    await client.request({
+      method: "hardhat_setCode" as never,
+      params: [
+        "0x0000000000000000000000000000000000000803",
+        jqCode,
+      ] as never,
+    });
+  }
+
+  async function clearOracleMocks(client: any) {
+    // Empty code at precompile addresses => oracle path fails.
+    await client.request({
+      method: "hardhat_setCode" as never,
+      params: [
+        "0x0000000000000000000000000000000000000801",
+        "0x",
+      ] as never,
+    });
+    await client.request({
+      method: "hardhat_setCode" as never,
+      params: [
+        "0x0000000000000000000000000000000000000803",
+        "0x",
+      ] as never,
+    });
   }
 
   it("deploys with a valid block time", async function () {
@@ -94,7 +179,10 @@ describe("RitualPredict", function () {
     const { viem } = await hre.network.getOrCreate();
 
     await expectRejected(async () => {
-      await viem.deployContract("RitualPredict", [0n]);
+      await viem.deployContract(
+        "RitualPredict",
+        [0n],
+      );
     });
   });
 
@@ -254,20 +342,18 @@ describe("RitualPredict", function () {
       factory.address.toLowerCase(),
     );
 
-    // Scheduler starts at the market's resolution block.
-    // MockScheduler stores uint32, so compare as BigInt.
     assert.equal(
       BigInt(call[2]),
       created.resolveBlock,
     );
 
-    // abi.encodeWithSelector(selector, uint256(0), marketId)
-    // = 4-byte selector + 32-byte executionIndex + 32-byte marketId.
     assert.equal(call[0].length, 138);
   });
 
   it("Scheduler callback reaches the market after betting closes", async function () {
     const { factory, viem } = await deploy();
+    const client = await viem.getPublicClient();
+    await clearOracleMocks(client);
 
     await factory.write.createMarket([market]);
 
@@ -278,29 +364,79 @@ describe("RitualPredict", function () {
 
     const before = await factory.read.getMarket([1n]);
 
-    // Advance the simulated chain beyond closeBlock.
-    const client = await viem.getPublicClient();
+    await mineBlocks(
+      client,
+      before.closeBlock -
+        (await client.getBlockNumber()) +
+        1n,
+    );
 
-    await client.request({
-      method: "hardhat_mine" as never,
-      params: [
-        `0x${(Number(before.closeBlock) - Number(await client.getBlockNumber()) + 1).toString(16)}`
-      ] as never,
-    });
-
-    const executeHash = await scheduler.write.execute([1n, 0n]);
-
-    await client.waitForTransactionReceipt({
-      hash: executeHash,
-    });
+    await execute(scheduler, client, 1n, 0n);
 
     const after = await factory.read.getMarket([1n]);
 
-    // The callback was reached. Oracle resolution will fail in this local
-    // mock environment because 0x0801/0x0803 are not real precompiles here,
-    // but the attempt itself must be recorded.
+    // Oracle fails without mocks; attempt is still recorded.
     assert.equal(after.attempts, 1);
     assert.equal(after.state, 2); // Resolving
+  });
+
+  it("records a failed oracle attempt without reverting", async function () {
+    const { factory, viem } = await deploy();
+    const client = await viem.getPublicClient();
+    await clearOracleMocks(client);
+
+    await factory.write.createMarket([market]);
+
+    const scheduler = await viem.getContractAt(
+      "MockScheduler",
+      SCHEDULER,
+    );
+
+    const created = await factory.read.getMarket([1n]);
+
+    await mineBlocks(
+      client,
+      created.closeBlock -
+        (await client.getBlockNumber()) +
+        1n,
+    );
+
+    await execute(scheduler, client, 1n, 0n);
+
+    const after = await factory.read.getMarket([1n]);
+
+    assert.equal(after.attempts, 1);
+    assert.equal(after.state, 2); // Resolving (failed, retries pending)
+  });
+
+  it("allows multiple scheduled attempts", async function () {
+    const { factory, viem } = await deploy();
+    const client = await viem.getPublicClient();
+    await clearOracleMocks(client);
+
+    await factory.write.createMarket([market]);
+
+    const scheduler = await viem.getContractAt(
+      "MockScheduler",
+      SCHEDULER,
+    );
+
+    const created = await factory.read.getMarket([1n]);
+
+    await mineBlocks(
+      client,
+      created.closeBlock -
+        (await client.getBlockNumber()) +
+        1n,
+    );
+
+    await execute(scheduler, client, 1n, 0n);
+    await execute(scheduler, client, 1n, 1n);
+
+    const after = await factory.read.getMarket([1n]);
+
+    assert.equal(after.attempts, 2);
+    assert.equal(after.state, 2);
   });
 
   it("exposes the expected protocol constants", async function () {
@@ -327,5 +463,345 @@ describe("RitualPredict", function () {
       await factory.read.EXECUTOR_PROBES(),
       8n,
     );
+  });
+
+  it("resolves successfully through mocked HTTP and jq", async function () {
+    const { factory, viem, alice, bob } = await deploy();
+    const client = await viem.getPublicClient();
+
+    await installOracleMocks(viem, client);
+
+    await factory.write.createMarket([market]);
+
+    // Need stakes so a YES win is Resolved, not Invalid ("no YES winners").
+    await factory.write.bet(
+      [1n, true],
+      {
+        account: alice.account,
+        value: 1_000_000_000_000_000_000n,
+      },
+    );
+    await factory.write.bet(
+      [1n, false],
+      {
+        account: bob.account,
+        value: 1_000_000_000_000_000_000n,
+      },
+    );
+
+    const scheduler = await viem.getContractAt(
+      "MockScheduler",
+      SCHEDULER,
+    );
+
+    const created = await factory.read.getMarket([1n]);
+
+    await mineBlocks(
+      client,
+      created.closeBlock -
+        (await client.getBlockNumber()) +
+        1n,
+    );
+
+    await execute(scheduler, client, 1n, 0n);
+
+    const resolved = await factory.read.getMarket([1n]);
+
+    assert.equal(resolved.state, 3, "market should be resolved");
+    assert.equal(resolved.outcome, 1, "YES should win");
+    assert.equal(resolved.observedValue, 3500n);
+  });
+
+  it("allows the winning YES bettor to claim the full pari-mutuel pool", async function () {
+    const {
+      factory,
+      viem,
+      alice,
+      bob,
+    } = await deploy();
+    const client = await viem.getPublicClient();
+
+    await installOracleMocks(viem, client);
+
+    // Default market: GT + target 3000, MockJQ returns 3500 => YES wins.
+    await factory.write.createMarket([market]);
+
+    await factory.write.bet(
+      [1n, true],
+      {
+        account: alice.account,
+        value: 1_000_000_000_000_000_000n,
+      },
+    );
+
+    await factory.write.bet(
+      [1n, false],
+      {
+        account: bob.account,
+        value: 2_000_000_000_000_000_000n,
+      },
+    );
+
+    const scheduler = await viem.getContractAt(
+      "MockScheduler",
+      SCHEDULER,
+    );
+
+    const created = await factory.read.getMarket([1n]);
+
+    await mineBlocks(
+      client,
+      created.closeBlock -
+        (await client.getBlockNumber()) +
+        1n,
+    );
+
+    await execute(scheduler, client, 1n, 0n);
+
+    const resolved = await factory.read.getMarket([1n]);
+
+    assert.equal(resolved.state, 3, "market should be resolved");
+    assert.equal(resolved.outcome, 1, "YES should win");
+    assert.equal(resolved.observedValue, 3500n);
+
+    const aliceStake = await factory.read.stakesOf([
+      1n,
+      alice.account.address,
+    ]);
+    const bobStake = await factory.read.stakesOf([
+      1n,
+      bob.account.address,
+    ]);
+
+    // 1 ETH YES + 2 ETH NO = 3 ETH pool; YES wins => Alice claims all 3 ETH.
+    assert.equal(
+      aliceStake[3],
+      3_000_000_000_000_000_000n,
+      "YES bettor should claim the full 3 ETH pool",
+    );
+    assert.equal(
+      bobStake[3],
+      0n,
+      "NO bettor must have no claimable payout",
+    );
+
+    await factory.write.claimWinnings(
+      [1n],
+      {
+        account: alice.account,
+      },
+    );
+  });
+
+  it("allows the winning NO bettor to claim the full pari-mutuel pool", async function () {
+    const {
+      factory,
+      viem,
+      alice,
+      bob,
+    } = await deploy();
+    const client = await viem.getPublicClient();
+
+    await installOracleMocks(viem, client);
+
+    // Option A: MockJQ returns 3500. GT + target 4000:
+    // 3500 > 4000 => false => NO wins.
+    await factory.write.createMarket([
+      {
+        ...market,
+        target: 4000n,
+        comparator: 0, // GT
+      },
+    ]);
+
+    await factory.write.bet(
+      [1n, true],
+      {
+        account: alice.account,
+        value: 1_000_000_000_000_000_000n,
+      },
+    );
+
+    await factory.write.bet(
+      [1n, false],
+      {
+        account: bob.account,
+        value: 2_000_000_000_000_000_000n,
+      },
+    );
+
+    const scheduler = await viem.getContractAt(
+      "MockScheduler",
+      SCHEDULER,
+    );
+
+    const created = await factory.read.getMarket([1n]);
+
+    await mineBlocks(
+      client,
+      created.closeBlock -
+        (await client.getBlockNumber()) +
+        1n,
+    );
+
+    await execute(scheduler, client, 1n, 0n);
+
+    const resolved = await factory.read.getMarket([1n]);
+
+    assert.equal(
+      resolved.state,
+      3,
+      "market should be resolved",
+    );
+    assert.equal(
+      resolved.outcome,
+      2,
+      "NO should win",
+    );
+    assert.equal(
+      resolved.observedValue,
+      3500n,
+      "oracle value should be 3500",
+    );
+
+    const aliceStake = await factory.read.stakesOf([
+      1n,
+      alice.account.address,
+    ]);
+    const bobStake = await factory.read.stakesOf([
+      1n,
+      bob.account.address,
+    ]);
+
+    // 1 ETH YES + 2 ETH NO = 3 ETH pool.
+    assert.equal(
+      aliceStake[3],
+      0n,
+      "YES bettor must have no claimable payout",
+    );
+    assert.equal(
+      bobStake[3],
+      3_000_000_000_000_000_000n,
+      "NO bettor should be able to claim the full 3 ETH pool",
+    );
+
+    await factory.write.claimWinnings(
+      [1n],
+      {
+        account: bob.account,
+      },
+    );
+  });
+
+  it("makes a market invalid and refunds stakes when there are no winners", async function () {
+    const { factory, viem, alice } = await deploy();
+    const client = await viem.getPublicClient();
+
+    await installOracleMocks(viem, client);
+
+    // Only YES bets; observed 3500 with GT+3000 => YES wins but no YES? Wait - need NO-empty side.
+    // Default: YES wins. Alice bets NO only => empty YES side when YES wins => Invalid.
+    await factory.write.createMarket([market]);
+
+    await factory.write.bet(
+      [1n, false],
+      {
+        account: alice.account,
+        value: 1_000_000_000_000_000_000n,
+      },
+    );
+
+    const scheduler = await viem.getContractAt(
+      "MockScheduler",
+      SCHEDULER,
+    );
+
+    const created = await factory.read.getMarket([1n]);
+
+    await mineBlocks(
+      client,
+      created.closeBlock -
+        (await client.getBlockNumber()) +
+        1n,
+    );
+
+    await execute(scheduler, client, 1n, 0n);
+
+    const after = await factory.read.getMarket([1n]);
+
+    assert.equal(after.state, 4, "market should be invalid");
+    assert.equal(after.outcome, 1, "YES was the winning side");
+
+    await factory.write.claimRefund(
+      [1n],
+      {
+        account: alice.account,
+      },
+    );
+  });
+
+  it("cancels the remaining Scheduler retries after successful resolution", async function () {
+    const { factory, viem, alice, bob } = await deploy();
+    const client = await viem.getPublicClient();
+
+    await installOracleMocks(viem, client);
+
+    await factory.write.createMarket([market]);
+
+    await factory.write.bet(
+      [1n, true],
+      {
+        account: alice.account,
+        value: 1_000_000_000_000_000_000n,
+      },
+    );
+    await factory.write.bet(
+      [1n, false],
+      {
+        account: bob.account,
+        value: 1_000_000_000_000_000_000n,
+      },
+    );
+
+    const scheduler = await viem.getContractAt(
+      "MockScheduler",
+      SCHEDULER,
+    );
+
+    const created = await factory.read.getMarket([1n]);
+
+    await mineBlocks(
+      client,
+      created.closeBlock -
+        (await client.getBlockNumber()) +
+        1n,
+    );
+
+    // First attempt resolves the market and cancels remaining retries.
+    await execute(scheduler, client, 1n, 0n);
+
+    const resolved = await factory.read.getMarket([1n]);
+    assert.equal(resolved.state, 3, "market should be resolved");
+    assert.equal(resolved.outcome, 1, "YES should win");
+
+    // Remaining scheduled executions must be cancelled by the contract.
+    await assert.rejects(
+      async () => {
+        await execute(scheduler, client, 1n, 1n);
+      },
+      /cancelled/i,
+    );
+
+    await assert.rejects(
+      async () => {
+        await execute(scheduler, client, 1n, 2n);
+      },
+      /cancelled/i,
+    );
+
+    // Market stays resolved after the cancel path.
+    const still = await factory.read.getMarket([1n]);
+    assert.equal(still.state, 3);
+    assert.equal(still.outcome, 1);
   });
 });

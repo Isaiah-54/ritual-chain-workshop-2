@@ -2,15 +2,29 @@
 pragma solidity ^0.8.28;
 
 contract MockTEERegistry {
-    address internal constant MOCK_EXECUTOR =
-        0x0000000000000000000000000000000000000001;
+    function setExecutor(
+        address,
+        bool
+    ) external {}
+
+    function executor() external pure returns (address) {
+        return address(1);
+    }
+
+    function available() external pure returns (bool) {
+        return true;
+    }
 
     function pickServiceByCapability(
         uint8,
         bool,
         uint256,
         uint256
-    ) external pure returns (address teeAddress, bool found) {
-        return (MOCK_EXECUTOR, true);
+    )
+        external
+        pure
+        returns (address teeAddress, bool found)
+    {
+        return (address(1), true);
     }
 }

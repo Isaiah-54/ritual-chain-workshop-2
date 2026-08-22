@@ -1,0 +1,25 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.28;
+
+contract MockHTTP {
+    fallback() external {
+        bytes memory body = bytes('{"price":3500}');
+
+        bytes memory actualOutput = abi.encode(
+            uint16(200),
+            new string[](0),
+            new string[](0),
+            body,
+            string("")
+        );
+
+        bytes memory response = abi.encode(
+            bytes(""),
+            actualOutput
+        );
+
+        assembly {
+            return(add(response, 32), mload(response))
+        }
+    }
+}
