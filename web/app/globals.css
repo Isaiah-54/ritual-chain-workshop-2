@@ -1,0 +1,44 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body {
+  background: #0b0d10;
+  color: #edeff2;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #22262e transparent;
+}
+
+.hairline {
+  border-color: #22262e;
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+@layer components {
+  .input {
+    @apply w-full rounded border border-line bg-ink px-3 py-2 text-sm text-paper placeholder:text-fog/60 focus:border-signal;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-pulse-dot {
+    animation: none;
+  }
+}
+
+:focus-visible {
+  outline: 2px solid #3fe0c5;
+  outline-offset: 2px;
+}
+
