@@ -1,428 +1,674 @@
 "use client";
-function formatEther(value: bigint) { return (Number(value) / 1e18).toFixed(4); }
 
-import { useEffect, useState, useCallback } from "react";
+import { useMemo, useState } from "react";
 
-import {
-  connectWallet,
-  createMarket,
-  getMarkets,
-  getStakes,
-  claimRefund,
-  claimWinnings,
-  placeBet,
-} from "@/lib/mock-contract";
-import {
-  Comparator,
-  comparatorLabel,
-  Market,
-  MarketState,
-  Outcome,
-  Stakes,
-} from "@/lib/types";
+type MarketState = "Open" | "Closed" | "Resolving" | "Resolved" | "Invalid";
+type Outcome = "Yes" | "No" | null;
 
-const stateLabel: Record<MarketState, string> = {
-  [MarketState.Open]: "Open",
-  [MarketState.Closed]: "Closed",
-  [MarketState.Resolving]: "Resolving",
-  [MarketState.Resolved]: "Resolved",
-  [MarketState.Invalid]: "Invalid",
+type Market = {
+  id: number;
+  question: string;
+  category: string;
+  target: string;
+  comparator: string;
+  oracle: string;
+  jsonPath: string;
+  state: MarketState;
+  outcome: Outcome;
+  observed: string;
+  yesPool: number;
+  noPool: number;
+  closeIn: string;
+  attempts: number;
+  invalidReason?: string;
 };
 
-const stateColor: Record<MarketState, string> = {
-  [MarketState.Open]: "text-signal",
-  [MarketState.Closed]: "text-fog",
-  [MarketState.Resolving]: "text-amber-400",
-  [MarketState.Resolved]: "text-signal",
-  [MarketState.Invalid]: "text-red-400",
-};
+const initialMarkets: Market[] = [
+  {
+    id: 1,
+    question: "Will ETH close above $4,000?",
+    category: "Crypto",
+    target: "$4,000",
+    comparator: "≥",
+    oracle: "HTTP Oracle",
+    jsonPath: "price",
+    state: "Open",
+    outcome: null,
+    observed: "—",
+    yesPool: 4.82,
+    noPool: 2.31,
+    closeIn: "18m",
+    attempts: 0,
+  },
+  {
+    id: 2,
+    question: "Will BTC remain above $110,000?",
+    category: "Crypto",
+    target: "$110,000",
+    comparator: "≥",
+    oracle: "HTTP Oracle",
+    jsonPath: "price",
+    state: "Resolving",
+    outcome: null,
+    observed: "—",
+    yesPool: 7.42,
+    noPool: 5.18,
+    closeIn: "Closed",
+    attempts: 2,
+  },
+  {
+    id: 3,
+    question: "Will Ritual publish a mainnet announcement?",
+    category: "Ritual",
+    target: "1",
+    comparator: "≥",
+    oracle: "HTTP Oracle",
+    jsonPath: "announcement",
+    state: "Resolved",
+    outcome: "Yes",
+    observed: "1",
+    yesPool: 8.15,
+    noPool: 3.44,
+    closeIn: "Resolved",
+    attempts: 1,
+  },
+  {
+    id: 4,
+    question: "Will the oracle return a valid numeric value?",
+    category: "Oracle",
+    target: "100",
+    comparator: "≥",
+    oracle: "HTTP Oracle",
+    jsonPath: "value",
+    state: "Invalid",
+    outcome: null,
+    observed: "—",
+    yesPool: 2.2,
+    noPool: 1.8,
+    closeIn: "Invalid",
+    attempts: 3,
+    invalidReason: "Oracle response could not be validated after maximum attempts.",
+  },
+];
+
+function shortNumber(value: number) {
+  return value.toFixed(2);
+}
+
+function stateClass(state: MarketState) {
+  switch (state) {
+    case "Open":
+      return "status-open";
+    case "Closed":
+      return "status-closed";
+    case "Resolving":
+      return "status-resolving";
+    case "Resolved":
+      return "status-resolved";
+    case "Invalid":
+      return "status-invalid";
+  }
+}
 
 export default function Page() {
-  const [account, setAccount] = useState<`0x${string}` | null>(null);
-  const [markets, setMarkets] = useState<Market[]>([]);
-  const [stakesByMarket, setStakesByMarket] = useState<Record<string, Stakes>>({});
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [showCreate, setShowCreate] = useState(false);
+  const [markets, setMarkets] = useState(initialMarkets);
+  const [connected, setConnected] = useState(false);
+  const [selected, setSelected] = useState<number | null>(null);
+  const [betAmount, setBetAmount] = useState("0.10");
+  const [activity, setActivity] = useState<string[]>([
+    "Demo environment initialized",
+    "RitualPredict resolution engine ready",
+  ]);
 
-  const refresh = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const list = await getMarkets();
-      setMarkets(list.slice().reverse());
-      if (account) {
-        const entries = await Promise.all(
-          list.map(async (m) => [m.id.toString(), await getStakes(m.id, account)] as const)
-        );
-        setStakesByMarket(Object.fromEntries(entries));
-      }
-    } catch (e: any) {
-      setError(e?.message || "Failed to load markets.");
-    } finally {
-      setLoading(false);
+  const stats = useMemo(() => {
+    const total = markets.reduce(
+      (sum, market) => sum + market.yesPool + market.noPool,
+      0,
+    );
+
+    return {
+      markets: markets.length,
+      volume: total,
+      resolved: markets.filter((m) => m.state === "Resolved").length,
+      resolving: markets.filter((m) => m.state === "Resolving").length,
+    };
+  }, [markets]);
+
+  function addActivity(message: string) {
+    setActivity((items) => [message, ...items].slice(0, 5));
+  }
+
+  function connectWallet() {
+    setConnected(true);
+    addActivity("Demo wallet connected");
+  }
+
+  function placeBet(id: number, outcome: "Yes" | "No") {
+    if (!connected) {
+      connectWallet();
     }
-  }, [account]);
 
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
+    const amount = Number(betAmount);
 
-  async function handleConnect() {
-    try {
-      const addr = await connectWallet();
-      setAccount(addr);
-    } catch (e: any) {
-      setError(e?.message || "Wallet connection failed.");
+    if (!Number.isFinite(amount) || amount <= 0) {
+      addActivity("Enter a valid demo bet amount");
+      return;
     }
+
+    setMarkets((current) =>
+      current.map((market) => {
+        if (market.id !== id || market.state !== "Open") {
+          return market;
+        }
+
+        return {
+          ...market,
+          yesPool:
+            outcome === "Yes" ? market.yesPool + amount : market.yesPool,
+          noPool:
+            outcome === "No" ? market.noPool + amount : market.noPool,
+        };
+      }),
+    );
+
+    addActivity(`Demo bet placed: ${amount.toFixed(2)} RITUAL on ${outcome}`);
+  }
+
+  function simulateResolution(id: number) {
+    setMarkets((current) =>
+      current.map((market) =>
+        market.id === id
+          ? {
+              ...market,
+              state: "Resolving",
+              attempts: Math.max(1, market.attempts),
+              closeIn: "Resolving",
+            }
+          : market,
+      ),
+    );
+
+    addActivity("Scheduler started resolution attempt");
+  }
+
+  function finishResolution(id: number, outcome: "Yes" | "No") {
+    setMarkets((current) =>
+      current.map((market) =>
+        market.id === id
+          ? {
+              ...market,
+              state: "Resolved",
+              outcome,
+              observed: market.target,
+              closeIn: "Resolved",
+              attempts: market.attempts + 1,
+            }
+          : market,
+      ),
+    );
+
+    addActivity(`Market #${id} resolved: ${outcome}`);
+  }
+
+  function simulateInvalid(id: number) {
+    setMarkets((current) =>
+      current.map((market) =>
+        market.id === id
+          ? {
+              ...market,
+              state: "Invalid",
+              outcome: null,
+              closeIn: "Invalid",
+              attempts: 3,
+              invalidReason:
+                "Demo failure: oracle response failed validation.",
+            }
+          : market,
+      ),
+    );
+
+    addActivity(`Market #${id} marked invalid — refunds available`);
   }
 
   return (
-    <main className="mx-auto max-w-3xl px-6 pb-24 pt-12">
-      <div className="mb-8 rounded border border-signal/30 bg-signal/5 px-4 py-2.5 text-xs text-signal">
-        Demo mode — Ritual testnet deployment has ended. This interface demonstrates the RitualPredict prediction-market flow locally.
-      </div>
+    <main>
+      <nav className="navbar">
+        <div className="nav-inner">
+          <div className="brand">
+            <div className="brand-mark">R</div>
+            <span>RitualPredict</span>
+            <span className="demo-pill">DEMO</span>
+          </div>
 
-      <header className="mb-10 flex flex-wrap items-end justify-between gap-4 border-b border-line pb-6">
+          <div className="nav-links">
+            <a href="#markets">Markets</a>
+            <a href="#resolution">Resolution</a>
+            <a href="#architecture">Architecture</a>
+          </div>
+
+          <button className="wallet-button" onClick={connectWallet}>
+            <span className={connected ? "wallet-dot connected" : "wallet-dot"} />
+            {connected ? "0x7A...42F1" : "Connect wallet"}
+          </button>
+        </div>
+      </nav>
+
+      <section className="hero">
+        <div className="hero-grid">
+          <div className="hero-copy">
+            <div className="eyebrow">
+              <span className="pulse" />
+              RITUAL CHAIN · PREDICTION MARKET
+            </div>
+
+            <h1>
+              Predict.
+              <br />
+              <span>Resolve.</span>
+              <br />
+              Settle.
+            </h1>
+
+            <p>
+              A prediction-market demonstration built around the RitualPredict
+              smart-contract architecture, Scheduler execution, TEE
+              verification, HTTP oracle data and deterministic resolution.
+            </p>
+
+            <div className="hero-actions">
+              <a href="#markets" className="primary-button">
+                Explore markets
+              </a>
+              <a href="#resolution" className="secondary-button">
+                View resolution flow
+              </a>
+            </div>
+          </div>
+
+          <div className="hero-card">
+            <div className="terminal-top">
+              <span />
+              <span />
+              <span />
+              <label>ritualpredict / resolution</label>
+            </div>
+
+            <div className="terminal-body">
+              <div>
+                <span className="terminal-muted">$</span> ritualpredict
+                resolve --market 42
+              </div>
+              <div className="terminal-line">
+                <span>✓</span> scheduler execution accepted
+              </div>
+              <div className="terminal-line">
+                <span>✓</span> TEE request verified
+              </div>
+              <div className="terminal-line">
+                <span>✓</span> HTTP response received
+              </div>
+              <div className="terminal-line">
+                <span>✓</span> jq path <b>price</b> extracted
+              </div>
+              <div className="terminal-line">
+                <span>✓</span> observed value = <b>4287</b>
+              </div>
+              <div className="terminal-result">
+                <small>COMPARATOR</small>
+                <strong>4287 ≥ 4000</strong>
+                <em>YES</em>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="stats-section">
+        <div className="stat">
+          <span>MARKETS</span>
+          <strong>{stats.markets}</strong>
+        </div>
+        <div className="stat">
+          <span>DEMO VOLUME</span>
+          <strong>{shortNumber(stats.volume)} RITUAL</strong>
+        </div>
+        <div className="stat">
+          <span>RESOLVED</span>
+          <strong>{stats.resolved}</strong>
+        </div>
+        <div className="stat">
+          <span>RESOLVING</span>
+          <strong>{stats.resolving}</strong>
+        </div>
+      </section>
+
+      <section id="markets" className="content-section">
+        <div className="section-heading">
+          <div>
+            <div className="eyebrow">LIVE DEMONSTRATION</div>
+            <h2>Prediction markets</h2>
+          </div>
+          <span className="section-note">SIMULATED · NO CONTRACT REQUIRED</span>
+        </div>
+
+        <div className="demo-banner">
+          <div className="banner-icon">!</div>
+          <div>
+            <strong>Ritual testnet deployment has ended.</strong>
+            <p>
+              This frontend intentionally runs as a self-contained project
+              demo. No deployed contract, wallet balance or live oracle is
+              required.
+            </p>
+          </div>
+        </div>
+
+        <div className="market-grid">
+          {markets.map((market) => {
+            const total = market.yesPool + market.noPool;
+            const yesPercent = total === 0 ? 50 : (market.yesPool / total) * 100;
+
+            return (
+              <article className="market-card" key={market.id}>
+                <div className="market-top">
+                  <span className="category">{market.category}</span>
+                  <span className={`status ${stateClass(market.state)}`}>
+                    {market.state}
+                  </span>
+                </div>
+
+                <h3>{market.question}</h3>
+
+                <div className="market-target">
+                  <span>RESOLUTION CONDITION</span>
+                  <strong>
+                    {market.comparator} {market.target}
+                  </strong>
+                </div>
+
+                <div className="pool-bar">
+                  <div style={{ width: `${yesPercent}%` }} />
+                </div>
+
+                <div className="pool-labels">
+                  <span>
+                    <b>YES</b> {shortNumber(market.yesPool)}
+                  </span>
+                  <span>
+                    <b>NO</b> {shortNumber(market.noPool)}
+                  </span>
+                </div>
+
+                <div className="market-meta">
+                  <span>
+                    Oracle <b>{market.oracle}</b>
+                  </span>
+                  <span>
+                    Path <b>{market.jsonPath}</b>
+                  </span>
+                  <span>
+                    Attempts <b>{market.attempts}</b>
+                  </span>
+                </div>
+
+                {market.state === "Open" && (
+                  <div className="bet-panel">
+                    <div className="amount-row">
+                      <input
+                        value={betAmount}
+                        onChange={(event) => setBetAmount(event.target.value)}
+                        inputMode="decimal"
+                        aria-label="Demo bet amount"
+                      />
+                      <span>RITUAL</span>
+                    </div>
+
+                    <button
+                      className="yes-button"
+                      onClick={() => placeBet(market.id, "Yes")}
+                    >
+                      Bet Yes
+                    </button>
+
+                    <button
+                      className="no-button"
+                      onClick={() => placeBet(market.id, "No")}
+                    >
+                      Bet No
+                    </button>
+                  </div>
+                )}
+
+                {market.state === "Resolving" && (
+                  <div className="resolution-controls">
+                    <button
+                      onClick={() => finishResolution(market.id, "Yes")}
+                    >
+                      Resolve YES
+                    </button>
+                    <button
+                      onClick={() => finishResolution(market.id, "No")}
+                    >
+                      Resolve NO
+                    </button>
+                    <button
+                      className="danger-button"
+                      onClick={() => simulateInvalid(market.id)}
+                    >
+                      Mark Invalid
+                    </button>
+                  </div>
+                )}
+
+                {market.state === "Closed" && (
+                  <button
+                    className="full-button"
+                    onClick={() => simulateResolution(market.id)}
+                  >
+                    Start resolution
+                  </button>
+                )}
+
+                {market.state === "Resolved" && (
+                  <div className="result-box">
+                    <span>OBSERVED VALUE</span>
+                    <strong>{market.observed}</strong>
+                    <em>OUTCOME: {market.outcome}</em>
+                  </div>
+                )}
+
+                {market.state === "Invalid" && (
+                  <div className="invalid-box">
+                    <strong>Market invalid</strong>
+                    <p>{market.invalidReason}</p>
+                    <button
+                      onClick={() =>
+                        addActivity(
+                          `Refund claimed for market #${market.id}`,
+                        )
+                      }
+                    >
+                      Claim demo refund
+                    </button>
+                  </div>
+                )}
+
+                <button
+                  className="details-button"
+                  onClick={() =>
+                    setSelected(selected === market.id ? null : market.id)
+                  }
+                >
+                  {selected === market.id ? "Hide details ↑" : "View details →"}
+                </button>
+
+                {selected === market.id && (
+                  <div className="market-details">
+                    <div>
+                      <span>Market ID</span>
+                      <b>#{market.id}</b>
+                    </div>
+                    <div>
+                      <span>Close status</span>
+                      <b>{market.closeIn}</b>
+                    </div>
+                    <div>
+                      <span>JSON path</span>
+                      <b>{market.jsonPath}</b>
+                    </div>
+                    <div>
+                      <span>Resolution</span>
+                      <b>
+                        observed {market.comparator} target
+                      </b>
+                    </div>
+                  </div>
+                )}
+              </article>
+            );
+          })}
+        </div>
+      </section>
+
+      <section id="resolution" className="resolution-section">
+        <div className="section-heading centered">
+          <div>
+            <div className="eyebrow">CORE ARCHITECTURE</div>
+            <h2>The resolution flow</h2>
+            <p>
+              Every market follows the same deterministic path from creation
+              to settlement.
+            </p>
+          </div>
+        </div>
+
+        <div className="flow">
+          <FlowStep number="01" title="Market Creation" text="Question, target, comparator and oracle configuration are stored." />
+          <FlowArrow />
+          <FlowStep number="02" title="Scheduler" text="A scheduled execution becomes eligible after the market closes." />
+          <FlowArrow />
+          <FlowStep number="03" title="Betting Closes" text="No further positions can be opened once the close condition is reached." />
+          <FlowArrow />
+          <FlowStep number="04" title="TEE Executor" text="Trusted execution performs the external-data workflow." />
+          <FlowArrow />
+          <FlowStep number="05" title="HTTP Oracle" text="The configured endpoint returns the external observation." />
+          <FlowArrow />
+          <FlowStep number="06" title="jq Extraction" text="The configured JSON path extracts the required value." />
+          <FlowArrow />
+          <FlowStep number="07" title="Observed Value" text="The extracted value is supplied to the resolution logic." />
+          <FlowArrow />
+          <FlowStep number="08" title="Comparator" text="The value is compared against the market target." />
+          <FlowArrow />
+          <div className="flow-final">
+            <div className="flow-outcome">
+              <span>09</span>
+              <strong>Market Resolution</strong>
+            </div>
+            <div className="outcome-grid">
+              <div className="outcome-card yes">
+                <b>YES</b>
+                <span>Winner payout</span>
+              </div>
+              <div className="outcome-card no">
+                <b>NO</b>
+                <span>Winner payout</span>
+              </div>
+              <div className="outcome-card invalid">
+                <b>INVALID</b>
+                <span>Refund handling</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="architecture" className="architecture-section">
+        <div className="architecture-copy">
+          <div className="eyebrow">PROJECT ARCHITECTURE</div>
+          <h2>Built to demonstrate the complete protocol flow.</h2>
+          <p>
+            RitualPredict combines a prediction-market contract with a
+            scheduler-driven resolution pipeline. The frontend mirrors the
+            contract states and settlement paths without pretending that the
+            retired Ritual testnet is still live.
+          </p>
+        </div>
+
+        <div className="architecture-grid">
+          <div>
+            <span>01</span>
+            <h3>Pari-mutuel pools</h3>
+            <p>YES and NO positions form the market pool used for settlement.</p>
+          </div>
+          <div>
+            <span>02</span>
+            <h3>Deterministic comparison</h3>
+            <p>Observed data is compared against a configured target.</p>
+          </div>
+          <div>
+            <span>03</span>
+            <h3>Failure handling</h3>
+            <p>Failed resolution can invalidate a market and enable refunds.</p>
+          </div>
+          <div>
+            <span>04</span>
+            <h3>Execution funding</h3>
+            <p>The architecture accounts for scheduled execution costs.</p>
+          </div>
+        </div>
+      </section>
+
+      <section className="activity-section">
+        <div className="activity-heading">
+          <div>
+            <div className="eyebrow">DEMO ACTIVITY</div>
+            <h2>Execution log</h2>
+          </div>
+          <span>LOCAL SIMULATION</span>
+        </div>
+
+        <div className="activity-log">
+          {activity.map((item, index) => (
+            <div key={`${item}-${index}`}>
+              <span>{String(index + 1).padStart(2, "0")}</span>
+              <p>{item}</p>
+              <small>NOW</small>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <footer>
         <div>
-          <p className="mb-2 font-mono text-[11px] uppercase tracking-[0.14em] text-fog">
-            Ritual Chain &middot; Academy Project
-          </p>
-          <h1 className="font-display text-4xl font-semibold tracking-tight text-paper">
-            Predict
-          </h1>
-          <p className="mt-1 text-sm text-fog">
-            Prediction markets powered by the RitualPredict resolution architecture.
-          </p>
+          <strong>RitualPredict</strong>
+          <span>Ritual Chain prediction-market workshop extension</span>
         </div>
-        {account ? (
-          <p className="font-mono text-sm text-fog tabular">
-            {account.slice(0, 6)}&hellip;{account.slice(-4)}
-          </p>
-        ) : (
-          <button
-            onClick={handleConnect}
-            className="rounded border border-signal bg-signal/10 px-4 py-2 text-sm font-medium text-signal transition hover:bg-signal/20"
-          >
-            Connect wallet
-          </button>
-        )}
-      </header>
-
-      {error && (
-        <div className="mb-5 rounded border border-red-400/40 bg-red-400/10 px-4 py-3 text-sm text-red-300">
-          {error}
-        </div>
-      )}
-
-      <div className="mb-5 flex items-center justify-between gap-3">
-        <span className="text-sm text-fog">
-          {loading ? "Loading markets\u2026" : `${markets.length} market${markets.length === 1 ? "" : "s"}`}
-        </span>
-        <div className="flex gap-2.5">
-          <button
-            onClick={refresh}
-            disabled={loading}
-            className="rounded border border-line px-4 py-2 text-sm text-paper transition hover:border-signal disabled:opacity-40"
-          >
-            Refresh
-          </button>
-          <button
-            onClick={() => setShowCreate((v) => !v)}
-            className="rounded border border-signal bg-signal/10 px-4 py-2 text-sm font-medium text-signal transition hover:bg-signal/20"
-          >
-            {showCreate ? "Close" : "New market"}
-          </button>
-        </div>
-      </div>
-
-      {showCreate && (
-        <CreatePanel
-          account={account}
-          onCreated={() => {
-            setShowCreate(false);
-            refresh();
-          }}
-          onError={setError}
-        />
-      )}
-
-      {!loading && markets.length === 0 && (
-        <div className="rounded border border-dashed border-line py-10 text-center text-sm text-fog">
-          No markets yet. Be the first to create one.
-        </div>
-      )}
-
-      <div className="flex flex-col gap-4">
-        {markets.map((m) => (
-          <MarketCard
-            key={m.id.toString()}
-            market={m}
-            account={account}
-            stakes={stakesByMarket[m.id.toString()]}
-            onChanged={refresh}
-            onError={setError}
-            onNeedAccount={handleConnect}
-          />
-        ))}
-      </div>
+        <span>DEMO MODE · NO LIVE CONTRACT</span>
+      </footer>
     </main>
   );
 }
 
-function CreatePanel({
-  account,
-  onCreated,
-  onError,
+function FlowStep({
+  number,
+  title,
+  text,
 }: {
-  account: `0x${string}` | null;
-  onCreated: () => void;
-  onError: (msg: string) => void;
+  number: string;
+  title: string;
+  text: string;
 }) {
-  const [question, setQuestion] = useState("");
-  const [oracleUrl, setOracleUrl] = useState("");
-  const [jsonPath, setJsonPath] = useState("");
-  const [target, setTarget] = useState("");
-  const [comparator, setComparator] = useState<Comparator>(Comparator.GTE);
-  const [bettingMinutes, setBettingMinutes] = useState("10");
-  const [resolveDelayMinutes, setResolveDelayMinutes] = useState("2");
-  const [submitting, setSubmitting] = useState(false);
-
-  async function submit() {
-    setSubmitting(true);
-    try {
-      await createMarket((account ?? "0x0000000000000000000000000000000000000000") as `0x${string}`, {
-        question,
-        oracleUrl,
-        jsonPath,
-        target: BigInt(target || "0"),
-        comparator,
-        bettingSeconds: BigInt(Number(bettingMinutes) * 60),
-        resolveDelaySeconds: BigInt(Number(resolveDelayMinutes) * 60),
-      });
-      onCreated();
-    } catch (e: any) {
-      onError(e?.message || "Failed to create market.");
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
   return (
-    <div className="mb-7 rounded border border-line bg-white/[0.02] p-6">
-      <h2 className="mb-4 font-display text-lg font-semibold text-paper">New market</h2>
-
-      <Field label="Question">
-        <input
-          className="input"
-          value={question}
-          onChange={(e) => setQuestion(e.target.value)}
-          placeholder="Will ETH close above $4,000?"
-        />
-      </Field>
-      <Field label="Oracle URL">
-        <input
-          className="input"
-          value={oracleUrl}
-          onChange={(e) => setOracleUrl(e.target.value)}
-          placeholder="https://your-tunnel.example.com/price"
-        />
-      </Field>
-      <div className="mb-3.5 grid grid-cols-2 gap-3">
-        <Field label="JSON path">
-          <input className="input" value={jsonPath} onChange={(e) => setJsonPath(e.target.value)} placeholder="price" />
-        </Field>
-        <Field label="Target value">
-          <input className="input" value={target} onChange={(e) => setTarget(e.target.value)} placeholder="4000" />
-        </Field>
+    <div className="flow-step">
+      <span>{number}</span>
+      <div>
+        <strong>{title}</strong>
+        <p>{text}</p>
       </div>
-      <div className="mb-3.5 grid grid-cols-2 gap-3">
-        <Field label="Comparator">
-          <select
-            className="input"
-            value={comparator}
-            onChange={(e) => setComparator(Number(e.target.value) as Comparator)}
-          >
-            {Object.values(Comparator)
-              .filter((v) => typeof v === "number")
-              .map((v) => (
-                <option key={v} value={v as number}>
-                  {comparatorLabel[v as Comparator]}
-                </option>
-              ))}
-          </select>
-        </Field>
-        <Field label="Betting window (min)">
-          <input className="input" value={bettingMinutes} onChange={(e) => setBettingMinutes(e.target.value)} />
-        </Field>
-      </div>
-      <Field label="Resolve delay after close (min)">
-        <input
-          className="input"
-          value={resolveDelayMinutes}
-          onChange={(e) => setResolveDelayMinutes(e.target.value)}
-        />
-      </Field>
-
-      <button
-        onClick={submit}
-        disabled={submitting || !question || !oracleUrl}
-        className="rounded border border-signal bg-signal/10 px-4 py-2 text-sm font-medium text-signal transition hover:bg-signal/20 disabled:opacity-40"
-      >
-        {submitting ? "Creating\u2026" : "Create market"}
-      </button>
     </div>
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="mb-3.5">
-      <label className="mb-1.5 block font-mono text-[11px] text-fog">{label}</label>
-      {children}
-    </div>
-  );
-}
-
-function MarketCard({
-  market,
-  account,
-  stakes,
-  onChanged,
-  onError,
-  onNeedAccount,
-}: {
-  market: Market;
-  account: `0x${string}` | null;
-  stakes?: Stakes;
-  onChanged: () => void;
-  onError: (msg: string) => void;
-  onNeedAccount: () => void;
-}) {
-  const [amount, setAmount] = useState("0.01");
-  const [busy, setBusy] = useState<"yes" | "no" | "claim" | "refund" | null>(null);
-
-  const total = market.totalYes + market.totalNo;
-  const yesPct = total === 0n ? 50 : Number((market.totalYes * 100n) / total);
-
-  async function bet(isYes: boolean) {
-    if (!account) return onNeedAccount();
-    setBusy(isYes ? "yes" : "no");
-    try {
-      await placeBet(account, market.id, isYes, amount);
-      onChanged();
-    } catch (e: any) {
-      onError(e?.message || "Bet failed.");
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function claim() {
-    if (!account) return;
-    setBusy("claim");
-    try {
-      await claimWinnings(account, market.id);
-      onChanged();
-    } catch (e: any) {
-      onError(e?.message || "Claim failed.");
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function refund() {
-    if (!account) return;
-    setBusy("refund");
-    try {
-      await claimRefund(account, market.id);
-      onChanged();
-    } catch (e: any) {
-      onError(e?.message || "Refund failed.");
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  const canBet = market.state === MarketState.Open;
-  const canClaim =
-    market.state === MarketState.Resolved && stakes && !stakes.alreadySettled && stakes.claimable > 0n;
-  const canRefund = market.state === MarketState.Invalid && stakes && !stakes.alreadySettled;
-
-  return (
-    <div className="rounded border border-line border-t-2 border-t-signal/60 bg-white/[0.02] p-5">
-      <div className="mb-2 flex items-start justify-between gap-3">
-        <p className="font-display text-lg font-semibold leading-snug text-paper">{market.question}</p>
-        <span className={`whitespace-nowrap font-mono text-[11px] uppercase tracking-wide ${stateColor[market.state]}`}>
-          {stateLabel[market.state]}
-        </span>
-      </div>
-
-      <p className="mb-3.5 font-mono text-xs text-fog">
-        target {comparatorLabel[market.comparator]} {market.target.toString()} &middot; {market.jsonPath} @ {market.oracleUrl}
-      </p>
-
-      <div className="mb-2 flex h-2 overflow-hidden rounded">
-        <div className="bg-signal" style={{ width: `${yesPct}%` }} />
-        <div className="bg-red-400/70" style={{ width: `${100 - yesPct}%` }} />
-      </div>
-      <div className="mb-4 flex justify-between text-xs text-fog tabular">
-        <span>Yes {formatEther(market.totalYes)} RITUAL</span>
-        <span>No {formatEther(market.totalNo)} RITUAL</span>
-      </div>
-
-      {canBet && (
-        <div className="flex flex-wrap items-center gap-2">
-          <input
-            className="input w-24"
-            value={amount}
-            onChange={(e) => setAmount(e.target.value)}
-          />
-          <button
-            onClick={() => bet(true)}
-            disabled={busy !== null}
-            className="rounded border border-signal px-3.5 py-2 text-sm text-signal transition hover:bg-signal/10 disabled:opacity-40"
-          >
-            {busy === "yes" ? "Betting\u2026" : "Bet Yes"}
-          </button>
-          <button
-            onClick={() => bet(false)}
-            disabled={busy !== null}
-            className="rounded border border-red-400/60 px-3.5 py-2 text-sm text-red-300 transition hover:bg-red-400/10 disabled:opacity-40"
-          >
-            {busy === "no" ? "Betting\u2026" : "Bet No"}
-          </button>
-        </div>
-      )}
-
-      {canClaim && (
-        <button
-          onClick={claim}
-          disabled={busy !== null}
-          className="rounded border border-signal bg-signal/10 px-4 py-2 text-sm font-medium text-signal transition hover:bg-signal/20 disabled:opacity-40"
-        >
-          {busy === "claim" ? "Claiming\u2026" : `Claim ${formatEther(stakes!.claimable)} RITUAL`}
-        </button>
-      )}
-
-      {canRefund && (
-        <button
-          onClick={refund}
-          disabled={busy !== null}
-          className="rounded border border-line px-4 py-2 text-sm text-paper transition hover:border-signal disabled:opacity-40"
-        >
-          {busy === "refund" ? "Refunding\u2026" : "Claim refund"}
-        </button>
-      )}
-
-      {market.state === MarketState.Resolved && (
-        <p className="mt-3 text-xs text-fog">
-          Outcome: {Outcome[market.outcome]} &middot; observed {market.observedValue.toString()}
-        </p>
-      )}
-      {market.state === MarketState.Invalid && market.invalidReason && (
-        <p className="mt-3 text-xs text-red-300">{market.invalidReason}</p>
-      )}
-    </div>
-  );
+function FlowArrow() {
+  return <div className="flow-arrow">↓</div>;
 }
