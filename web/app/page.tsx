@@ -10,7 +10,7 @@ import {
   claimRefund,
   claimWinnings,
   placeBet,
-} from "@/lib/mock-contract";
+} from "@/lib/contract";
 import {
   Comparator,
   comparatorLabel,
