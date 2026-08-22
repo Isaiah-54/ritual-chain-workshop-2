@@ -1,674 +1,475 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 
-type MarketState = "Open" | "Closed" | "Resolving" | "Resolved" | "Invalid";
-type Outcome = "Yes" | "No" | null;
-
-type Market = {
-  id: number;
-  question: string;
-  category: string;
-  target: string;
-  comparator: string;
-  oracle: string;
-  jsonPath: string;
-  state: MarketState;
-  outcome: Outcome;
-  observed: string;
-  yesPool: number;
-  noPool: number;
-  closeIn: string;
-  attempts: number;
-  invalidReason?: string;
+type Stage = {
+  name: string;
+  short: string;
+  description: string;
 };
 
-const initialMarkets: Market[] = [
+const stages: Stage[] = [
   {
-    id: 1,
-    question: "Will ETH close above $4,000?",
-    category: "Crypto",
-    target: "$4,000",
-    comparator: "≥",
-    oracle: "HTTP Oracle",
-    jsonPath: "price",
-    state: "Open",
-    outcome: null,
-    observed: "—",
-    yesPool: 4.82,
-    noPool: 2.31,
-    closeIn: "18m",
-    attempts: 0,
+    name: "Scheduler",
+    short: "SCHED",
+    description: "Triggers the market resolution job at the configured block.",
   },
   {
-    id: 2,
-    question: "Will BTC remain above $110,000?",
-    category: "Crypto",
-    target: "$110,000",
-    comparator: "≥",
-    oracle: "HTTP Oracle",
-    jsonPath: "price",
-    state: "Resolving",
-    outcome: null,
-    observed: "—",
-    yesPool: 7.42,
-    noPool: 5.18,
-    closeIn: "Closed",
-    attempts: 2,
+    name: "TEE",
+    short: "TEE",
+    description: "Executes the resolution workflow in a trusted environment.",
   },
   {
-    id: 3,
-    question: "Will Ritual publish a mainnet announcement?",
-    category: "Ritual",
-    target: "1",
-    comparator: "≥",
-    oracle: "HTTP Oracle",
-    jsonPath: "announcement",
-    state: "Resolved",
-    outcome: "Yes",
-    observed: "1",
-    yesPool: 8.15,
-    noPool: 3.44,
-    closeIn: "Resolved",
-    attempts: 1,
+    name: "HTTP",
+    short: "HTTP",
+    description: "Fetches the external data source requested by the market.",
   },
   {
-    id: 4,
-    question: "Will the oracle return a valid numeric value?",
-    category: "Oracle",
-    target: "100",
-    comparator: "≥",
-    oracle: "HTTP Oracle",
-    jsonPath: "value",
-    state: "Invalid",
-    outcome: null,
-    observed: "—",
-    yesPool: 2.2,
-    noPool: 1.8,
-    closeIn: "Invalid",
-    attempts: 3,
-    invalidReason: "Oracle response could not be validated after maximum attempts.",
+    name: "jq",
+    short: "jq",
+    description: "Extracts the required value from the HTTP response.",
+  },
+  {
+    name: "Comparator",
+    short: "CMP",
+    description: "Evaluates the observed value against the market condition.",
+  },
+  {
+    name: "Resolution",
+    short: "RES",
+    description: "Produces the final Yes / No outcome.",
+  },
+  {
+    name: "Payout / Refund",
+    short: "PAY",
+    description: "Winners receive their payout; invalid markets are refundable.",
   },
 ];
 
-function shortNumber(value: number) {
-  return value.toFixed(2);
-}
-
-function stateClass(state: MarketState) {
-  switch (state) {
-    case "Open":
-      return "status-open";
-    case "Closed":
-      return "status-closed";
-    case "Resolving":
-      return "status-resolving";
-    case "Resolved":
-      return "status-resolved";
-    case "Invalid":
-      return "status-invalid";
-  }
-}
+const demoMarkets = [
+  {
+    id: "#001",
+    question: "Will ETH price be ≥ $4,000?",
+    source: "api.example.com/eth",
+    path: "price",
+    target: "$4,000",
+    observed: "$4,126",
+    outcome: "YES",
+    yes: 68,
+    no: 32,
+    status: "RESOLVED",
+  },
+  {
+    id: "#002",
+    question: "Will BTC price be ≥ $120,000?",
+    source: "api.example.com/btc",
+    path: "price",
+    target: "$120,000",
+    observed: "$118,450",
+    outcome: "NO",
+    yes: 41,
+    no: 59,
+    status: "RESOLVED",
+  },
+  {
+    id: "#003",
+    question: "Will ETH gas be < 20 gwei?",
+    source: "api.example.com/gas",
+    path: "gas",
+    target: "20",
+    observed: "14",
+    outcome: "YES",
+    yes: 57,
+    no: 43,
+    status: "OPEN",
+  },
+];
 
 export default function Page() {
-  const [markets, setMarkets] = useState(initialMarkets);
-  const [connected, setConnected] = useState(false);
-  const [selected, setSelected] = useState<number | null>(null);
-  const [betAmount, setBetAmount] = useState("0.10");
-  const [activity, setActivity] = useState<string[]>([
-    "Demo environment initialized",
-    "RitualPredict resolution engine ready",
-  ]);
+  const [activeStage, setActiveStage] = useState(0);
+  const [selectedMarket, setSelectedMarket] = useState(2);
+  const [amount, setAmount] = useState("0.10");
+  const [side, setSide] = useState<"YES" | "NO" | null>(null);
+  const [notice, setNotice] = useState("");
 
-  const stats = useMemo(() => {
-    const total = markets.reduce(
-      (sum, market) => sum + market.yesPool + market.noPool,
-      0,
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setActiveStage((value) => (value + 1) % stages.length);
+    }, 2200);
+
+    return () => clearInterval(timer);
+  }, []);
+
+  const market = demoMarkets[selectedMarket];
+
+  function placeDemoBet(choice: "YES" | "NO") {
+    setSide(choice);
+    setNotice(
+      `Demo position created: ${amount || "0"} RITUAL on ${choice}. No transaction is sent.`
     );
-
-    return {
-      markets: markets.length,
-      volume: total,
-      resolved: markets.filter((m) => m.state === "Resolved").length,
-      resolving: markets.filter((m) => m.state === "Resolving").length,
-    };
-  }, [markets]);
-
-  function addActivity(message: string) {
-    setActivity((items) => [message, ...items].slice(0, 5));
-  }
-
-  function connectWallet() {
-    setConnected(true);
-    addActivity("Demo wallet connected");
-  }
-
-  function placeBet(id: number, outcome: "Yes" | "No") {
-    if (!connected) {
-      connectWallet();
-    }
-
-    const amount = Number(betAmount);
-
-    if (!Number.isFinite(amount) || amount <= 0) {
-      addActivity("Enter a valid demo bet amount");
-      return;
-    }
-
-    setMarkets((current) =>
-      current.map((market) => {
-        if (market.id !== id || market.state !== "Open") {
-          return market;
-        }
-
-        return {
-          ...market,
-          yesPool:
-            outcome === "Yes" ? market.yesPool + amount : market.yesPool,
-          noPool:
-            outcome === "No" ? market.noPool + amount : market.noPool,
-        };
-      }),
-    );
-
-    addActivity(`Demo bet placed: ${amount.toFixed(2)} RITUAL on ${outcome}`);
-  }
-
-  function simulateResolution(id: number) {
-    setMarkets((current) =>
-      current.map((market) =>
-        market.id === id
-          ? {
-              ...market,
-              state: "Resolving",
-              attempts: Math.max(1, market.attempts),
-              closeIn: "Resolving",
-            }
-          : market,
-      ),
-    );
-
-    addActivity("Scheduler started resolution attempt");
-  }
-
-  function finishResolution(id: number, outcome: "Yes" | "No") {
-    setMarkets((current) =>
-      current.map((market) =>
-        market.id === id
-          ? {
-              ...market,
-              state: "Resolved",
-              outcome,
-              observed: market.target,
-              closeIn: "Resolved",
-              attempts: market.attempts + 1,
-            }
-          : market,
-      ),
-    );
-
-    addActivity(`Market #${id} resolved: ${outcome}`);
-  }
-
-  function simulateInvalid(id: number) {
-    setMarkets((current) =>
-      current.map((market) =>
-        market.id === id
-          ? {
-              ...market,
-              state: "Invalid",
-              outcome: null,
-              closeIn: "Invalid",
-              attempts: 3,
-              invalidReason:
-                "Demo failure: oracle response failed validation.",
-            }
-          : market,
-      ),
-    );
-
-    addActivity(`Market #${id} marked invalid — refunds available`);
   }
 
   return (
-    <main>
-      <nav className="navbar">
-        <div className="nav-inner">
-          <div className="brand">
-            <div className="brand-mark">R</div>
-            <span>RitualPredict</span>
-            <span className="demo-pill">DEMO</span>
+    <main className="min-h-screen">
+      <nav className="nav">
+        <div className="brand">
+          <span className="brand-mark">R</span>
+          <div>
+            <strong>RitualPredict</strong>
+            <span>protocol demonstration</span>
           </div>
+        </div>
 
-          <div className="nav-links">
-            <a href="#markets">Markets</a>
-            <a href="#resolution">Resolution</a>
-            <a href="#architecture">Architecture</a>
-          </div>
+        <div className="nav-links">
+          <a href="#markets">Markets</a>
+          <a href="#architecture">Architecture</a>
+          <a href="#resolution">Resolution</a>
+        </div>
 
-          <button className="wallet-button" onClick={connectWallet}>
-            <span className={connected ? "wallet-dot connected" : "wallet-dot"} />
-            {connected ? "0x7A...42F1" : "Connect wallet"}
-          </button>
+        <div className="demo-pill">
+          <span className="status-dot" />
+          DEMO MODE
         </div>
       </nav>
 
       <section className="hero">
-        <div className="hero-grid">
-          <div className="hero-copy">
-            <div className="eyebrow">
-              <span className="pulse" />
-              RITUAL CHAIN · PREDICTION MARKET
-            </div>
+        <div className="hero-copy">
+          <div className="eyebrow">
+            <span>RITUAL CHAIN</span>
+            <span className="slash">/</span>
+            <span>ACADEMY PROJECT</span>
+          </div>
 
-            <h1>
-              Predict.
-              <br />
-              <span>Resolve.</span>
-              <br />
-              Settle.
-            </h1>
+          <h1>
+            Prediction markets
+            <br />
+            <span>with verifiable resolution.</span>
+          </h1>
 
-            <p>
-              A prediction-market demonstration built around the RitualPredict
-              smart-contract architecture, Scheduler execution, TEE
-              verification, HTTP oracle data and deterministic resolution.
-            </p>
+          <p className="hero-text">
+            RitualPredict demonstrates how prediction markets can be resolved
+            through a programmable Scheduler → TEE → HTTP → jq → Comparator
+            pipeline.
+          </p>
 
-            <div className="hero-actions">
-              <a href="#markets" className="primary-button">
-                Explore markets
-              </a>
-              <a href="#resolution" className="secondary-button">
-                View resolution flow
-              </a>
+          <div className="hero-actions">
+            <a className="primary-btn" href="#markets">
+              Explore markets <span>↓</span>
+            </a>
+            <a className="secondary-btn" href="#architecture">
+              View architecture
+            </a>
+          </div>
+        </div>
+
+        <div className="hero-visual">
+          <div className="orb">
+            <div className="orb-ring ring-one" />
+            <div className="orb-ring ring-two" />
+            <div className="orb-core">
+              <span>RITUAL</span>
+              <strong>∞</strong>
+              <small>RESOLUTION</small>
             </div>
           </div>
 
-          <div className="hero-card">
-            <div className="terminal-top">
-              <span />
-              <span />
-              <span />
-              <label>ritualpredict / resolution</label>
-            </div>
+          <div className="floating-card card-top">
+            <span className="mini-label">ORACLE</span>
+            <strong>HTTP → jq</strong>
+            <small>external data</small>
+          </div>
 
-            <div className="terminal-body">
-              <div>
-                <span className="terminal-muted">$</span> ritualpredict
-                resolve --market 42
-              </div>
-              <div className="terminal-line">
-                <span>✓</span> scheduler execution accepted
-              </div>
-              <div className="terminal-line">
-                <span>✓</span> TEE request verified
-              </div>
-              <div className="terminal-line">
-                <span>✓</span> HTTP response received
-              </div>
-              <div className="terminal-line">
-                <span>✓</span> jq path <b>price</b> extracted
-              </div>
-              <div className="terminal-line">
-                <span>✓</span> observed value = <b>4287</b>
-              </div>
-              <div className="terminal-result">
-                <small>COMPARATOR</small>
-                <strong>4287 ≥ 4000</strong>
-                <em>YES</em>
-              </div>
-            </div>
+          <div className="floating-card card-bottom">
+            <span className="mini-label">RESULT</span>
+            <strong>YES</strong>
+            <small>verified outcome</small>
           </div>
         </div>
       </section>
 
-      <section className="stats-section">
-        <div className="stat">
+      <section className="stats">
+        <div>
           <span>MARKETS</span>
-          <strong>{stats.markets}</strong>
+          <strong>03</strong>
         </div>
-        <div className="stat">
-          <span>DEMO VOLUME</span>
-          <strong>{shortNumber(stats.volume)} RITUAL</strong>
+        <div>
+          <span>RESOLUTION ENGINE</span>
+          <strong>TEE</strong>
         </div>
-        <div className="stat">
-          <span>RESOLVED</span>
-          <strong>{stats.resolved}</strong>
+        <div>
+          <span>DATA SOURCE</span>
+          <strong>HTTP</strong>
         </div>
-        <div className="stat">
-          <span>RESOLVING</span>
-          <strong>{stats.resolving}</strong>
+        <div>
+          <span>CONTRACT</span>
+          <strong>SIMULATED</strong>
         </div>
       </section>
 
-      <section id="markets" className="content-section">
+      <section id="architecture" className="section">
         <div className="section-heading">
           <div>
-            <div className="eyebrow">LIVE DEMONSTRATION</div>
-            <h2>Prediction markets</h2>
+            <span className="section-number">01 / ARCHITECTURE</span>
+            <h2>From trigger to outcome.</h2>
           </div>
-          <span className="section-note">SIMULATED · NO CONTRACT REQUIRED</span>
-        </div>
-
-        <div className="demo-banner">
-          <div className="banner-icon">!</div>
-          <div>
-            <strong>Ritual testnet deployment has ended.</strong>
-            <p>
-              This frontend intentionally runs as a self-contained project
-              demo. No deployed contract, wallet balance or live oracle is
-              required.
-            </p>
-          </div>
-        </div>
-
-        <div className="market-grid">
-          {markets.map((market) => {
-            const total = market.yesPool + market.noPool;
-            const yesPercent = total === 0 ? 50 : (market.yesPool / total) * 100;
-
-            return (
-              <article className="market-card" key={market.id}>
-                <div className="market-top">
-                  <span className="category">{market.category}</span>
-                  <span className={`status ${stateClass(market.state)}`}>
-                    {market.state}
-                  </span>
-                </div>
-
-                <h3>{market.question}</h3>
-
-                <div className="market-target">
-                  <span>RESOLUTION CONDITION</span>
-                  <strong>
-                    {market.comparator} {market.target}
-                  </strong>
-                </div>
-
-                <div className="pool-bar">
-                  <div style={{ width: `${yesPercent}%` }} />
-                </div>
-
-                <div className="pool-labels">
-                  <span>
-                    <b>YES</b> {shortNumber(market.yesPool)}
-                  </span>
-                  <span>
-                    <b>NO</b> {shortNumber(market.noPool)}
-                  </span>
-                </div>
-
-                <div className="market-meta">
-                  <span>
-                    Oracle <b>{market.oracle}</b>
-                  </span>
-                  <span>
-                    Path <b>{market.jsonPath}</b>
-                  </span>
-                  <span>
-                    Attempts <b>{market.attempts}</b>
-                  </span>
-                </div>
-
-                {market.state === "Open" && (
-                  <div className="bet-panel">
-                    <div className="amount-row">
-                      <input
-                        value={betAmount}
-                        onChange={(event) => setBetAmount(event.target.value)}
-                        inputMode="decimal"
-                        aria-label="Demo bet amount"
-                      />
-                      <span>RITUAL</span>
-                    </div>
-
-                    <button
-                      className="yes-button"
-                      onClick={() => placeBet(market.id, "Yes")}
-                    >
-                      Bet Yes
-                    </button>
-
-                    <button
-                      className="no-button"
-                      onClick={() => placeBet(market.id, "No")}
-                    >
-                      Bet No
-                    </button>
-                  </div>
-                )}
-
-                {market.state === "Resolving" && (
-                  <div className="resolution-controls">
-                    <button
-                      onClick={() => finishResolution(market.id, "Yes")}
-                    >
-                      Resolve YES
-                    </button>
-                    <button
-                      onClick={() => finishResolution(market.id, "No")}
-                    >
-                      Resolve NO
-                    </button>
-                    <button
-                      className="danger-button"
-                      onClick={() => simulateInvalid(market.id)}
-                    >
-                      Mark Invalid
-                    </button>
-                  </div>
-                )}
-
-                {market.state === "Closed" && (
-                  <button
-                    className="full-button"
-                    onClick={() => simulateResolution(market.id)}
-                  >
-                    Start resolution
-                  </button>
-                )}
-
-                {market.state === "Resolved" && (
-                  <div className="result-box">
-                    <span>OBSERVED VALUE</span>
-                    <strong>{market.observed}</strong>
-                    <em>OUTCOME: {market.outcome}</em>
-                  </div>
-                )}
-
-                {market.state === "Invalid" && (
-                  <div className="invalid-box">
-                    <strong>Market invalid</strong>
-                    <p>{market.invalidReason}</p>
-                    <button
-                      onClick={() =>
-                        addActivity(
-                          `Refund claimed for market #${market.id}`,
-                        )
-                      }
-                    >
-                      Claim demo refund
-                    </button>
-                  </div>
-                )}
-
-                <button
-                  className="details-button"
-                  onClick={() =>
-                    setSelected(selected === market.id ? null : market.id)
-                  }
-                >
-                  {selected === market.id ? "Hide details ↑" : "View details →"}
-                </button>
-
-                {selected === market.id && (
-                  <div className="market-details">
-                    <div>
-                      <span>Market ID</span>
-                      <b>#{market.id}</b>
-                    </div>
-                    <div>
-                      <span>Close status</span>
-                      <b>{market.closeIn}</b>
-                    </div>
-                    <div>
-                      <span>JSON path</span>
-                      <b>{market.jsonPath}</b>
-                    </div>
-                    <div>
-                      <span>Resolution</span>
-                      <b>
-                        observed {market.comparator} target
-                      </b>
-                    </div>
-                  </div>
-                )}
-              </article>
-            );
-          })}
-        </div>
-      </section>
-
-      <section id="resolution" className="resolution-section">
-        <div className="section-heading centered">
-          <div>
-            <div className="eyebrow">CORE ARCHITECTURE</div>
-            <h2>The resolution flow</h2>
-            <p>
-              Every market follows the same deterministic path from creation
-              to settlement.
-            </p>
-          </div>
-        </div>
-
-        <div className="flow">
-          <FlowStep number="01" title="Market Creation" text="Question, target, comparator and oracle configuration are stored." />
-          <FlowArrow />
-          <FlowStep number="02" title="Scheduler" text="A scheduled execution becomes eligible after the market closes." />
-          <FlowArrow />
-          <FlowStep number="03" title="Betting Closes" text="No further positions can be opened once the close condition is reached." />
-          <FlowArrow />
-          <FlowStep number="04" title="TEE Executor" text="Trusted execution performs the external-data workflow." />
-          <FlowArrow />
-          <FlowStep number="05" title="HTTP Oracle" text="The configured endpoint returns the external observation." />
-          <FlowArrow />
-          <FlowStep number="06" title="jq Extraction" text="The configured JSON path extracts the required value." />
-          <FlowArrow />
-          <FlowStep number="07" title="Observed Value" text="The extracted value is supplied to the resolution logic." />
-          <FlowArrow />
-          <FlowStep number="08" title="Comparator" text="The value is compared against the market target." />
-          <FlowArrow />
-          <div className="flow-final">
-            <div className="flow-outcome">
-              <span>09</span>
-              <strong>Market Resolution</strong>
-            </div>
-            <div className="outcome-grid">
-              <div className="outcome-card yes">
-                <b>YES</b>
-                <span>Winner payout</span>
-              </div>
-              <div className="outcome-card no">
-                <b>NO</b>
-                <span>Winner payout</span>
-              </div>
-              <div className="outcome-card invalid">
-                <b>INVALID</b>
-                <span>Refund handling</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section id="architecture" className="architecture-section">
-        <div className="architecture-copy">
-          <div className="eyebrow">PROJECT ARCHITECTURE</div>
-          <h2>Built to demonstrate the complete protocol flow.</h2>
           <p>
-            RitualPredict combines a prediction-market contract with a
-            scheduler-driven resolution pipeline. The frontend mirrors the
-            contract states and settlement paths without pretending that the
-            retired Ritual testnet is still live.
+            The entire resolution lifecycle is represented below as an
+            interactive protocol pipeline.
           </p>
         </div>
 
-        <div className="architecture-grid">
+        <div className="pipeline">
+          {stages.map((stage, index) => (
+            <button
+              key={stage.name}
+              className={`pipeline-node ${
+                activeStage === index ? "active" : ""
+              }`}
+              onClick={() => setActiveStage(index)}
+            >
+              <div className="node-top">
+                <span>0{index + 1}</span>
+                {index < stages.length - 1 && <i />}
+              </div>
+
+              <div className="node-icon">
+                {index === 0 && "◷"}
+                {index === 1 && "◇"}
+                {index === 2 && "↗"}
+                {index === 3 && "⌘"}
+                {index === 4 && "≥"}
+                {index === 5 && "✓"}
+                {index === 6 && "₿"}
+              </div>
+
+              <strong>{stage.name}</strong>
+              <small>{stage.short}</small>
+            </button>
+          ))}
+        </div>
+
+        <div className="stage-detail">
+          <div className="stage-number">STEP 0{activeStage + 1}</div>
           <div>
-            <span>01</span>
-            <h3>Pari-mutuel pools</h3>
-            <p>YES and NO positions form the market pool used for settlement.</p>
+            <h3>{stages[activeStage].name}</h3>
+            <p>{stages[activeStage].description}</p>
           </div>
-          <div>
-            <span>02</span>
-            <h3>Deterministic comparison</h3>
-            <p>Observed data is compared against a configured target.</p>
-          </div>
-          <div>
-            <span>03</span>
-            <h3>Failure handling</h3>
-            <p>Failed resolution can invalidate a market and enable refunds.</p>
-          </div>
-          <div>
-            <span>04</span>
-            <h3>Execution funding</h3>
-            <p>The architecture accounts for scheduled execution costs.</p>
+          <div className="stage-status">
+            <span className="status-dot" />
+            PROCESSING
           </div>
         </div>
       </section>
 
-      <section className="activity-section">
-        <div className="activity-heading">
+      <section id="markets" className="section markets-section">
+        <div className="section-heading">
           <div>
-            <div className="eyebrow">DEMO ACTIVITY</div>
-            <h2>Execution log</h2>
+            <span className="section-number">02 / MARKETS</span>
+            <h2>Prediction markets.</h2>
           </div>
-          <span>LOCAL SIMULATION</span>
+          <p>
+            Explore simulated markets and experience the complete prediction
+            flow without a deployed contract.
+          </p>
         </div>
 
-        <div className="activity-log">
-          {activity.map((item, index) => (
-            <div key={`${item}-${index}`}>
-              <span>{String(index + 1).padStart(2, "0")}</span>
-              <p>{item}</p>
-              <small>NOW</small>
+        <div className="market-layout">
+          <div className="market-list">
+            {demoMarkets.map((item, index) => (
+              <button
+                key={item.id}
+                className={`market-row ${
+                  selectedMarket === index ? "selected" : ""
+                }`}
+                onClick={() => setSelectedMarket(index)}
+              >
+                <div className="market-id">{item.id}</div>
+
+                <div className="market-question">
+                  <strong>{item.question}</strong>
+                  <span>
+                    {item.status} · {item.source}
+                  </span>
+                </div>
+
+                <div className="market-outcome">
+                  <strong className={item.outcome === "YES" ? "yes" : "no"}>
+                    {item.outcome}
+                  </strong>
+                  <span>outcome</span>
+                </div>
+              </button>
+            ))}
+          </div>
+
+          <div className="market-detail">
+            <div className="market-header">
+              <div>
+                <span className="live-tag">
+                  {market.status === "OPEN" ? "● OPEN" : "✓ RESOLVED"}
+                </span>
+                <span className="market-id">{market.id}</span>
+              </div>
+              <span className="market-chain">RITUALPREDICT</span>
             </div>
-          ))}
+
+            <h3>{market.question}</h3>
+
+            <div className="data-grid">
+              <div>
+                <span>ORACLE SOURCE</span>
+                <strong>{market.source}</strong>
+              </div>
+              <div>
+                <span>JSON PATH</span>
+                <strong>{market.path}</strong>
+              </div>
+              <div>
+                <span>TARGET</span>
+                <strong>{market.target}</strong>
+              </div>
+              <div>
+                <span>OBSERVED VALUE</span>
+                <strong>{market.observed}</strong>
+              </div>
+            </div>
+
+            <div className="distribution">
+              <div className="distribution-head">
+                <span>MARKET DISTRIBUTION</span>
+                <span>{market.yes}% / {market.no}%</span>
+              </div>
+
+              <div className="distribution-bar">
+                <div style={{ width: `${market.yes}%` }} />
+              </div>
+
+              <div className="distribution-labels">
+                <span>YES {market.yes}%</span>
+                <span>NO {market.no}%</span>
+              </div>
+            </div>
+
+            {market.status === "OPEN" ? (
+              <div className="bet-box">
+                <div className="bet-title">
+                  <span>DEMO POSITION</span>
+                  <small>No blockchain transaction</small>
+                </div>
+
+                <div className="bet-controls">
+                  <div className="amount">
+                    <input
+                      value={amount}
+                      onChange={(event) => setAmount(event.target.value)}
+                      inputMode="decimal"
+                    />
+                    <span>RITUAL</span>
+                  </div>
+
+                  <button
+                    className={`bet-yes ${side === "YES" ? "chosen" : ""}`}
+                    onClick={() => placeDemoBet("YES")}
+                  >
+                    BET YES
+                  </button>
+
+                  <button
+                    className={`bet-no ${side === "NO" ? "chosen" : ""}`}
+                    onClick={() => placeDemoBet("NO")}
+                  >
+                    BET NO
+                  </button>
+                </div>
+
+                {notice && <div className="notice">{notice}</div>}
+              </div>
+            ) : (
+              <div className="resolved-box">
+                <div>
+                  <span>RESOLUTION</span>
+                  <strong>{market.outcome}</strong>
+                </div>
+                <div>
+                  <span>SETTLEMENT</span>
+                  <strong>PAYOUT</strong>
+                </div>
+                <div>
+                  <span>VERIFICATION</span>
+                  <strong>COMPLETE</strong>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </section>
+
+      <section id="resolution" className="section resolution-section">
+        <div className="section-heading">
+          <div>
+            <span className="section-number">03 / RESOLUTION</span>
+            <h2>See the protocol think.</h2>
+          </div>
+          <p>
+            A visual representation of the resolution lifecycle used by the
+            RitualPredict architecture.
+          </p>
+        </div>
+
+        <div className="resolution-console">
+          <div className="console-header">
+            <span>
+              <i />
+              RESOLUTION TRACE
+            </span>
+            <span>MARKET #001</span>
+          </div>
+
+          <div className="console-body">
+            {[
+              ["SCHEDULER", "Resolution job triggered", "08:42:11"],
+              ["TEE", "Trusted execution environment initialized", "08:42:12"],
+              ["HTTP", "External oracle response received", "08:42:13"],
+              ["jq", "Value extracted: price = 4126", "08:42:13"],
+              ["COMPARATOR", "4126 ≥ 4000 → TRUE", "08:42:14"],
+              ["RESOLUTION", "Outcome finalized: YES", "08:42:14"],
+              ["PAYOUT", "Winning positions eligible for settlement", "08:42:15"],
+            ].map(([label, text, time], index) => (
+              <div className="trace-row" key={label}>
+                <span className="trace-index">0{index + 1}</span>
+                <strong>{label}</strong>
+                <span>{text}</span>
+                <time>{time}</time>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="demo-note">
+        <div className="note-icon">i</div>
+        <div>
+          <strong>About this demonstration</strong>
+          <p>
+            The Ritual testnet used during development has ended. This
+            frontend intentionally operates as a polished simulation of the
+            RitualPredict architecture and does not require a deployed smart
+            contract, wallet connection, RPC endpoint, or live oracle.
+          </p>
         </div>
       </section>
 
       <footer>
-        <div>
-          <strong>RitualPredict</strong>
-          <span>Ritual Chain prediction-market workshop extension</span>
+        <div className="brand">
+          <span className="brand-mark">R</span>
+          <div>
+            <strong>RitualPredict</strong>
+            <span>prediction market architecture demo</span>
+          </div>
         </div>
-        <span>DEMO MODE · NO LIVE CONTRACT</span>
+
+        <span>Built for the Ritual Chain Academy project</span>
       </footer>
     </main>
   );
-}
-
-function FlowStep({
-  number,
-  title,
-  text,
-}: {
-  number: string;
-  title: string;
-  text: string;
-}) {
-  return (
-    <div className="flow-step">
-      <span>{number}</span>
-      <div>
-        <strong>{title}</strong>
-        <p>{text}</p>
-      </div>
-    </div>
-  );
-}
-
-function FlowArrow() {
-  return <div className="flow-arrow">↓</div>;
 }
