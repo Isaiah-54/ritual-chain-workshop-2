@@ -10,7 +10,7 @@ import {
   claimRefund,
   claimWinnings,
   placeBet,
-} from "@/lib/contract";
+} from "@/lib/mock-contract";
 import {
   Comparator,
   comparatorLabel,
@@ -79,7 +79,7 @@ export default function Page() {
   return (
     <main className="mx-auto max-w-3xl px-6 pb-24 pt-12">
       <div className="mb-8 rounded border border-signal/30 bg-signal/5 px-4 py-2.5 text-xs text-signal">
-        Demo mode &mdash; showing simulated markets, no live contract is deployed.
+        Demo mode — Ritual testnet deployment has ended. This interface demonstrates the RitualPredict prediction-market flow locally.
       </div>
 
       <header className="mb-10 flex flex-wrap items-end justify-between gap-4 border-b border-line pb-6">
@@ -91,7 +91,7 @@ export default function Page() {
             Predict
           </h1>
           <p className="mt-1 text-sm text-fog">
-            On-chain markets, resolved by the scheduler &mdash; no oracle committee.
+            Prediction markets powered by the RitualPredict resolution architecture.
           </p>
         </div>
         {account ? (
