@@ -2,141 +2,145 @@
 
 import { useEffect, useState } from "react";
 
-type Stage = {
-  name: string;
-  short: string;
-  description: string;
-};
-
-const stages: Stage[] = [
+const stages = [
   {
-    name: "Scheduler",
+    number: "01",
     short: "SCHED",
-    description: "Triggers the market resolution job at the configured block.",
+    name: "Scheduler",
+    icon: "◷",
+    description: "Resolution job triggered",
+    detail: "A scheduled task starts the resolution process.",
   },
   {
-    name: "TEE",
+    number: "02",
     short: "TEE",
-    description: "Executes the resolution workflow in a trusted environment.",
+    name: "TEE",
+    icon: "◇",
+    description: "Trusted execution environment initialized",
+    detail: "The computation runs inside a trusted environment.",
   },
   {
-    name: "HTTP",
+    number: "03",
     short: "HTTP",
-    description: "Fetches the external data source requested by the market.",
+    name: "HTTP",
+    icon: "↗",
+    description: "External oracle response received",
+    detail: "The resolver fetches data from an external HTTP endpoint.",
   },
   {
-    name: "jq",
+    number: "04",
     short: "jq",
-    description: "Extracts the required value from the HTTP response.",
+    name: "jq",
+    icon: "⌘",
+    description: "Value extracted from response",
+    detail: "A JSON query extracts the value required for evaluation.",
   },
   {
-    name: "Comparator",
+    number: "05",
     short: "CMP",
-    description: "Evaluates the observed value against the market condition.",
+    name: "Comparator",
+    icon: "≥",
+    description: "Condition evaluated",
+    detail: "The extracted value is compared against the market target.",
   },
   {
-    name: "Resolution",
+    number: "06",
     short: "RES",
-    description: "Produces the final Yes / No outcome.",
+    name: "Resolution",
+    icon: "✓",
+    description: "Outcome finalized",
+    detail: "The market becomes YES or NO.",
   },
   {
-    name: "Payout / Refund",
+    number: "07",
     short: "PAY",
-    description: "Winners receive their payout; invalid markets are refundable.",
+    name: "Payout / Refund",
+    icon: "₿",
+    description: "Settlement becomes available",
+    detail: "Winning positions receive payout; invalid markets receive refunds.",
   },
 ];
 
-const demoMarkets = [
+const markets = [
   {
     id: "#001",
     question: "Will ETH price be ≥ $4,000?",
-    source: "api.example.com/eth",
+    oracle: "api.example.com/eth",
     path: "price",
-    target: "$4,000",
-    observed: "$4,126",
-    outcome: "YES",
-    yes: 68,
-    no: 32,
+    target: "4,000",
+    observed: "4,126",
+    yes: 76,
+    no: 24,
     status: "RESOLVED",
+    outcome: "YES",
   },
   {
     id: "#002",
     question: "Will BTC price be ≥ $120,000?",
-    source: "api.example.com/btc",
+    oracle: "api.example.com/btc",
     path: "price",
-    target: "$120,000",
-    observed: "$118,450",
-    outcome: "NO",
-    yes: 41,
-    no: 59,
+    target: "120,000",
+    observed: "117,420",
+    yes: 38,
+    no: 62,
     status: "RESOLVED",
+    outcome: "NO",
   },
   {
     id: "#003",
     question: "Will ETH gas be < 20 gwei?",
-    source: "api.example.com/gas",
+    oracle: "api.example.com/gas",
     path: "gas",
     target: "20",
     observed: "14",
-    outcome: "YES",
     yes: 57,
     no: 43,
     status: "OPEN",
+    outcome: null,
   },
 ];
 
-export default function Page() {
+export default function Home() {
   const [activeStage, setActiveStage] = useState(0);
   const [selectedMarket, setSelectedMarket] = useState(2);
-  const [amount, setAmount] = useState("0.10");
-  const [side, setSide] = useState<"YES" | "NO" | null>(null);
-  const [notice, setNotice] = useState("");
 
   useEffect(() => {
     const timer = setInterval(() => {
-      setActiveStage((value) => (value + 1) % stages.length);
-    }, 2200);
+      setActiveStage((current) => (current + 1) % stages.length);
+    }, 2400);
 
     return () => clearInterval(timer);
   }, []);
 
-  const market = demoMarkets[selectedMarket];
-
-  function placeDemoBet(choice: "YES" | "NO") {
-    setSide(choice);
-    setNotice(
-      `Demo position created: ${amount || "0"} RITUAL on ${choice}. No transaction is sent.`
-    );
-  }
+  const market = markets[selectedMarket];
 
   return (
-    <main className="min-h-screen">
+    <main>
       <nav className="nav">
-        <div className="brand">
+        <a href="#" className="brand">
           <span className="brand-mark">R</span>
-          <div>
-            <strong>RitualPredict</strong>
-            <span>protocol demonstration</span>
-          </div>
-        </div>
+          <span>RitualPredict</span>
+        </a>
 
         <div className="nav-links">
-          <a href="#markets">Markets</a>
           <a href="#architecture">Architecture</a>
+          <a href="#markets">Markets</a>
           <a href="#resolution">Resolution</a>
         </div>
 
         <div className="demo-pill">
-          <span className="status-dot" />
+          <span className="live-dot" />
           DEMO MODE
         </div>
       </nav>
 
       <section className="hero">
-        <div className="hero-copy">
+        <div className="hero-grid" />
+
+        <div className="hero-content">
           <div className="eyebrow">
             <span>RITUAL CHAIN</span>
-            <span className="slash">/</span>
+            <span className="separator">/</span>
             <span>ACADEMY PROJECT</span>
           </div>
 
@@ -146,63 +150,90 @@ export default function Page() {
             <span>with verifiable resolution.</span>
           </h1>
 
-          <p className="hero-text">
+          <p className="hero-copy">
             RitualPredict demonstrates how prediction markets can be resolved
             through a programmable Scheduler → TEE → HTTP → jq → Comparator
             pipeline.
           </p>
 
           <div className="hero-actions">
-            <a className="primary-btn" href="#markets">
+            <a href="#markets" className="button button-primary">
               Explore markets <span>↓</span>
             </a>
-            <a className="secondary-btn" href="#architecture">
+            <a href="#architecture" className="button button-secondary">
               View architecture
             </a>
           </div>
-        </div>
 
-        <div className="hero-visual">
-          <div className="orb">
-            <div className="orb-ring ring-one" />
-            <div className="orb-ring ring-two" />
-            <div className="orb-core">
-              <span>RITUAL</span>
-              <strong>∞</strong>
-              <small>RESOLUTION</small>
+          <div className="hero-stats">
+            <div>
+              <strong>07</strong>
+              <span>PIPELINE STAGES</span>
+            </div>
+            <div>
+              <strong>03</strong>
+              <span>DEMO MARKETS</span>
+            </div>
+            <div>
+              <strong>TEE</strong>
+              <span>RESOLUTION ENGINE</span>
+            </div>
+            <div>
+              <strong>HTTP</strong>
+              <span>DATA SOURCE</span>
             </div>
           </div>
+        </div>
 
-          <div className="floating-card card-top">
-            <span className="mini-label">ORACLE</span>
-            <strong>HTTP → jq</strong>
-            <small>external data</small>
+        <div className="hero-engine">
+          <div className="engine-header">
+            <div>
+              <span className="tiny-label">RESOLUTION ENGINE</span>
+              <h3>Protocol execution</h3>
+            </div>
+            <span className="engine-status">
+              <span className="live-dot" />
+              SIMULATED
+            </span>
           </div>
 
-          <div className="floating-card card-bottom">
-            <span className="mini-label">RESULT</span>
-            <strong>YES</strong>
-            <small>verified outcome</small>
-          </div>
-        </div>
-      </section>
+          <div className="engine-visual">
+            {stages.map((stage, index) => (
+              <div className="engine-stage-wrap" key={stage.short}>
+                <div
+                  className={`engine-stage ${
+                    activeStage === index ? "active" : ""
+                  } ${index < activeStage ? "passed" : ""}`}
+                  onClick={() => setActiveStage(index)}
+                >
+                  <span className="stage-icon">{stage.icon}</span>
+                  <span className="stage-number">{stage.number}</span>
+                  <strong>{stage.short}</strong>
+                </div>
 
-      <section className="stats">
-        <div>
-          <span>MARKETS</span>
-          <strong>03</strong>
-        </div>
-        <div>
-          <span>RESOLUTION ENGINE</span>
-          <strong>TEE</strong>
-        </div>
-        <div>
-          <span>DATA SOURCE</span>
-          <strong>HTTP</strong>
-        </div>
-        <div>
-          <span>CONTRACT</span>
-          <strong>SIMULATED</strong>
+                {index < stages.length - 1 && (
+                  <div
+                    className={`engine-line ${
+                      index < activeStage ? "filled" : ""
+                    }`}
+                  />
+                )}
+              </div>
+            ))}
+          </div>
+
+          <div className="engine-detail">
+            <div className="detail-number">{stages[activeStage].number}</div>
+            <div>
+              <span>{stages[activeStage].short}</span>
+              <strong>{stages[activeStage].name}</strong>
+              <p>{stages[activeStage].description}</p>
+            </div>
+            <div className="processing">
+              <span className="processing-dot" />
+              PROCESSING
+            </div>
+          </div>
         </div>
       </section>
 
@@ -213,51 +244,29 @@ export default function Page() {
             <h2>From trigger to outcome.</h2>
           </div>
           <p>
-            The entire resolution lifecycle is represented below as an
-            interactive protocol pipeline.
+            Every stage of the resolution lifecycle is represented as a
+            programmable protocol step.
           </p>
         </div>
 
         <div className="pipeline">
           {stages.map((stage, index) => (
             <button
-              key={stage.name}
-              className={`pipeline-node ${
-                activeStage === index ? "active" : ""
+              key={stage.short}
+              className={`pipeline-card ${
+                activeStage === index ? "selected" : ""
               }`}
               onClick={() => setActiveStage(index)}
             >
-              <div className="node-top">
-                <span>0{index + 1}</span>
-                {index < stages.length - 1 && <i />}
+              <div className="pipeline-top">
+                <span>{stage.number}</span>
+                <span>{stage.icon}</span>
               </div>
-
-              <div className="node-icon">
-                {index === 0 && "◷"}
-                {index === 1 && "◇"}
-                {index === 2 && "↗"}
-                {index === 3 && "⌘"}
-                {index === 4 && "≥"}
-                {index === 5 && "✓"}
-                {index === 6 && "₿"}
-              </div>
-
               <strong>{stage.name}</strong>
-              <small>{stage.short}</small>
+              <span>{stage.short}</span>
+              <p>{stage.detail}</p>
             </button>
           ))}
-        </div>
-
-        <div className="stage-detail">
-          <div className="stage-number">STEP 0{activeStage + 1}</div>
-          <div>
-            <h3>{stages[activeStage].name}</h3>
-            <p>{stages[activeStage].description}</p>
-          </div>
-          <div className="stage-status">
-            <span className="status-dot" />
-            PROCESSING
-          </div>
         </div>
       </section>
 
@@ -273,52 +282,62 @@ export default function Page() {
           </p>
         </div>
 
-        <div className="market-layout">
+        <div className="markets-layout">
           <div className="market-list">
-            {demoMarkets.map((item, index) => (
+            {markets.map((item, index) => (
               <button
                 key={item.id}
-                className={`market-row ${
+                className={`market-list-item ${
                   selectedMarket === index ? "selected" : ""
                 }`}
                 onClick={() => setSelectedMarket(index)}
               >
-                <div className="market-id">{item.id}</div>
-
-                <div className="market-question">
-                  <strong>{item.question}</strong>
-                  <span>
-                    {item.status} · {item.source}
-                  </span>
-                </div>
-
-                <div className="market-outcome">
-                  <strong className={item.outcome === "YES" ? "yes" : "no"}>
-                    {item.outcome}
-                  </strong>
-                  <span>outcome</span>
-                </div>
+                <span className="market-id">{item.id}</span>
+                <span className="market-question">{item.question}</span>
+                <span
+                  className={`market-status ${
+                    item.status === "OPEN" ? "open" : ""
+                  }`}
+                >
+                  {item.status}
+                </span>
               </button>
             ))}
           </div>
 
-          <div className="market-detail">
-            <div className="market-header">
+          <div className="market-detail-card">
+            <div className="market-card-header">
               <div>
-                <span className="live-tag">
-                  {market.status === "OPEN" ? "● OPEN" : "✓ RESOLVED"}
-                </span>
-                <span className="market-id">{market.id}</span>
+                <span className="tiny-label">MARKET {market.id}</span>
+                <h3>{market.question}</h3>
               </div>
-              <span className="market-chain">RITUALPREDICT</span>
+              <span
+                className={`status-badge ${
+                  market.status === "OPEN" ? "open" : ""
+                }`}
+              >
+                <span />
+                {market.status}
+              </span>
             </div>
 
-            <h3>{market.question}</h3>
+            <div className="probability">
+              <div className="probability-labels">
+                <span>YES</span>
+                <strong>{market.yes}%</strong>
+                <span>NO</span>
+                <strong>{market.no}%</strong>
+              </div>
 
-            <div className="data-grid">
+              <div className="probability-bar">
+                <div style={{ width: `${market.yes}%` }} />
+              </div>
+            </div>
+
+            <div className="market-data">
               <div>
                 <span>ORACLE SOURCE</span>
-                <strong>{market.source}</strong>
+                <strong>{market.oracle}</strong>
               </div>
               <div>
                 <span>JSON PATH</span>
@@ -334,72 +353,31 @@ export default function Page() {
               </div>
             </div>
 
-            <div className="distribution">
-              <div className="distribution-head">
-                <span>MARKET DISTRIBUTION</span>
-                <span>{market.yes}% / {market.no}%</span>
+            <div className="market-result">
+              <div>
+                <span>RESOLUTION RESULT</span>
+                <strong
+                  className={market.outcome === "YES" ? "yes" : "no"}
+                >
+                  {market.outcome || "AWAITING RESOLUTION"}
+                </strong>
               </div>
 
-              <div className="distribution-bar">
-                <div style={{ width: `${market.yes}%` }} />
-              </div>
-
-              <div className="distribution-labels">
-                <span>YES {market.yes}%</span>
-                <span>NO {market.no}%</span>
+              <div className="demo-position">
+                <span>DEMO POSITION</span>
+                <strong>No blockchain transaction</strong>
               </div>
             </div>
 
-            {market.status === "OPEN" ? (
-              <div className="bet-box">
-                <div className="bet-title">
-                  <span>DEMO POSITION</span>
-                  <small>No blockchain transaction</small>
-                </div>
+            <div className="bet-actions">
+              <button className="bet-yes">Bet YES</button>
+              <button className="bet-no">Bet NO</button>
+            </div>
 
-                <div className="bet-controls">
-                  <div className="amount">
-                    <input
-                      value={amount}
-                      onChange={(event) => setAmount(event.target.value)}
-                      inputMode="decimal"
-                    />
-                    <span>RITUAL</span>
-                  </div>
-
-                  <button
-                    className={`bet-yes ${side === "YES" ? "chosen" : ""}`}
-                    onClick={() => placeDemoBet("YES")}
-                  >
-                    BET YES
-                  </button>
-
-                  <button
-                    className={`bet-no ${side === "NO" ? "chosen" : ""}`}
-                    onClick={() => placeDemoBet("NO")}
-                  >
-                    BET NO
-                  </button>
-                </div>
-
-                {notice && <div className="notice">{notice}</div>}
-              </div>
-            ) : (
-              <div className="resolved-box">
-                <div>
-                  <span>RESOLUTION</span>
-                  <strong>{market.outcome}</strong>
-                </div>
-                <div>
-                  <span>SETTLEMENT</span>
-                  <strong>PAYOUT</strong>
-                </div>
-                <div>
-                  <span>VERIFICATION</span>
-                  <strong>COMPLETE</strong>
-                </div>
-              </div>
-            )}
+            <div className="simulation-note">
+              <span>i</span>
+              Actions are simulated locally. No wallet or contract is required.
+            </div>
           </div>
         </div>
       </section>
@@ -411,44 +389,123 @@ export default function Page() {
             <h2>See the protocol think.</h2>
           </div>
           <p>
-            A visual representation of the resolution lifecycle used by the
-            RitualPredict architecture.
+            Follow a complete resolution trace from scheduled execution to
+            final settlement.
           </p>
         </div>
 
-        <div className="resolution-console">
-          <div className="console-header">
-            <span>
-              <i />
-              RESOLUTION TRACE
+        <div className="trace">
+          <div className="trace-header">
+            <div>
+              <span className="tiny-label">RESOLUTION TRACE</span>
+              <h3>MARKET #001</h3>
+            </div>
+            <span className="trace-state">
+              <span className="live-dot" />
+              RESOLVED
             </span>
-            <span>MARKET #001</span>
           </div>
 
-          <div className="console-body">
-            {[
-              ["SCHEDULER", "Resolution job triggered", "08:42:11"],
-              ["TEE", "Trusted execution environment initialized", "08:42:12"],
-              ["HTTP", "External oracle response received", "08:42:13"],
-              ["jq", "Value extracted: price = 4126", "08:42:13"],
-              ["COMPARATOR", "4126 ≥ 4000 → TRUE", "08:42:14"],
-              ["RESOLUTION", "Outcome finalized: YES", "08:42:14"],
-              ["PAYOUT", "Winning positions eligible for settlement", "08:42:15"],
-            ].map(([label, text, time], index) => (
-              <div className="trace-row" key={label}>
-                <span className="trace-index">0{index + 1}</span>
-                <strong>{label}</strong>
-                <span>{text}</span>
-                <time>{time}</time>
-              </div>
-            ))}
+          <div className="trace-body">
+            <TraceRow
+              number="01"
+              title="SCHEDULER"
+              text="Resolution job triggered"
+              value="JOB #8F21"
+            />
+            <TraceRow
+              number="02"
+              title="TEE"
+              text="Trusted execution environment initialized"
+              value="VERIFIED"
+            />
+            <TraceRow
+              number="03"
+              title="HTTP"
+              text="External oracle response received"
+              value="200 OK"
+            />
+            <TraceRow
+              number="04"
+              title="jq"
+              text="Value extracted: price = 4126"
+              value=".price → 4126"
+            />
+            <TraceRow
+              number="05"
+              title="COMPARATOR"
+              text="4126 ≥ 4000 → TRUE"
+              value="TRUE"
+            />
+            <TraceRow
+              number="06"
+              title="RESOLUTION"
+              text="Outcome finalized: YES"
+              value="YES"
+              highlight
+            />
+            <TraceRow
+              number="07"
+              title="PAYOUT"
+              text="Winning positions eligible for settlement"
+              value="READY"
+            />
           </div>
         </div>
       </section>
 
-      <section className="demo-note">
-        <div className="note-icon">i</div>
-        <div>
+      <section className="section architecture-summary">
+        <div className="summary-card">
+          <div className="summary-icon">∞</div>
+          <div>
+            <span className="tiny-label">RITUALPREDICT</span>
+            <h2>Resolution without an oracle committee.</h2>
+            <p>
+              The demonstration shows how external data can move through a
+              deterministic resolution pipeline before producing a market
+              outcome.
+            </p>
+          </div>
+        </div>
+
+        <div className="summary-grid">
+          <div>
+            <span>TRIGGER</span>
+            <strong>Scheduler</strong>
+          </div>
+          <div>
+            <span>EXECUTION</span>
+            <strong>TEE</strong>
+          </div>
+          <div>
+            <span>DATA</span>
+            <strong>HTTP</strong>
+          </div>
+          <div>
+            <span>TRANSFORM</span>
+            <strong>jq</strong>
+          </div>
+          <div>
+            <span>LOGIC</span>
+            <strong>Comparator</strong>
+          </div>
+          <div>
+            <span>SETTLEMENT</span>
+            <strong>Payout / Refund</strong>
+          </div>
+        </div>
+      </section>
+
+      <footer>
+        <div className="footer-brand">
+          <span className="brand-mark">R</span>
+          <div>
+            <strong>RitualPredict</strong>
+            <span>prediction market architecture demo</span>
+          </div>
+        </div>
+
+        <div className="footer-note">
           <strong>About this demonstration</strong>
           <p>
             The Ritual testnet used during development has ended. This
@@ -457,19 +514,38 @@ export default function Page() {
             contract, wallet connection, RPC endpoint, or live oracle.
           </p>
         </div>
-      </section>
 
-      <footer>
-        <div className="brand">
-          <span className="brand-mark">R</span>
-          <div>
-            <strong>RitualPredict</strong>
-            <span>prediction market architecture demo</span>
-          </div>
+        <div className="footer-bottom">
+          <span>BUILT FOR THE RITUAL CHAIN ACADEMY PROJECT</span>
+          <span>SIMULATION / NO LIVE CONTRACT</span>
         </div>
-
-        <span>Built for the Ritual Chain Academy project</span>
       </footer>
     </main>
+  );
+}
+
+function TraceRow({
+  number,
+  title,
+  text,
+  value,
+  highlight = false,
+}: {
+  number: string;
+  title: string;
+  text: string;
+  value: string;
+  highlight?: boolean;
+}) {
+  return (
+    <div className={`trace-row ${highlight ? "highlight" : ""}`}>
+      <span className="trace-number">{number}</span>
+      <span className="trace-check">✓</span>
+      <div className="trace-copy">
+        <strong>{title}</strong>
+        <span>{text}</span>
+      </div>
+      <code>{value}</code>
+    </div>
   );
 }
