@@ -10,6 +10,16 @@ import {MockHTTP} from "../test/MockHTTP.sol";
 import {MockJQ} from "../test/MockJQ.sol";
 
 /// Solidity unit tests for RitualPredict (Hardhat 3 / forge-std).
+contract MockRitualWallet {
+    mapping(address => uint256) public balanceOf;
+    mapping(address => uint256) public lockUntil;
+
+    function deposit(uint256 lockDuration) external payable {
+        balanceOf[msg.sender] += msg.value;
+        lockUntil[msg.sender] = block.number + lockDuration;
+    }
+}
+
 contract RitualPredictTest is Test {
     RitualPredict internal predict;
     MockScheduler internal scheduler;
@@ -36,6 +46,9 @@ contract RitualPredictTest is Test {
 
         MockJQ jq = new MockJQ();
         vm.etch(RitualChain.JQ_PRECOMPILE, address(jq).code);
+
+        MockRitualWallet wallet = new MockRitualWallet();
+        vm.etch(RitualChain.RITUAL_WALLET, address(wallet).code);
 
         predict = new RitualPredict(195);
 
@@ -503,4 +516,473 @@ contract RitualPredictTest is Test {
             uint8(RitualPredict.Outcome.No)
         );
     }
+
+    function test_RevertResolveBlockOverflowsUint32() public {
+        vm.roll(uint256(type(uint32).max) - 10);
+
+        vm.expectRevert(RitualPredict.BadDuration.selector);
+        predict.createMarket(_defaultMarket());
+    }
+
+    function test_OnScheduledResolveNoopAfterResolved() public {
+        uint256 id = predict.createMarket(_defaultMarket());
+
+        vm.prank(alice);
+        predict.bet{value: 1 ether}(id, true);
+
+        vm.prank(bob);
+        predict.bet{value: 1 ether}(id, false);
+
+        _minePastClose(id);
+        _execute(1, 0);
+
+        RitualPredict.Market memory before = predict.getMarket(id);
+        assertEq(
+            uint8(before.state),
+            uint8(RitualPredict.MarketState.Resolved)
+        );
+
+        vm.prank(RitualChain.SCHEDULER);
+        predict.onScheduledResolve(1, id);
+
+        RitualPredict.Market memory afterCall = predict.getMarket(id);
+        assertEq(
+            uint8(afterCall.state),
+            uint8(RitualPredict.MarketState.Resolved)
+        );
+        assertEq(afterCall.attempts, before.attempts);
+    }
+
+    function test_OnScheduledResolveIgnoresAttemptBeyondMax() public {
+        uint256 id = predict.createMarket(_defaultMarket());
+        _minePastClose(id);
+
+        vm.prank(RitualChain.SCHEDULER);
+        predict.onScheduledResolve(3, id);
+
+        RitualPredict.Market memory m = predict.getMarket(id);
+        assertEq(m.attempts, 0);
+        assertEq(
+            uint8(m.state),
+            uint8(RitualPredict.MarketState.Closed)
+        );
+    }
+
+    function test_OnScheduledResolveIgnoredBeforeClose() public {
+        uint256 id = predict.createMarket(_defaultMarket());
+
+        vm.prank(RitualChain.SCHEDULER);
+        predict.onScheduledResolve(0, id);
+
+        RitualPredict.Market memory m = predict.getMarket(id);
+        assertEq(m.attempts, 0);
+        assertEq(
+            uint8(m.state),
+            uint8(RitualPredict.MarketState.Open)
+        );
+    }
+
+    function test_NoExecutorAvailableRecordsFailure() public {
+        MockTEENotFound notFound = new MockTEENotFound();
+        vm.etch(
+            RitualChain.TEE_SERVICE_REGISTRY,
+            address(notFound).code
+        );
+
+        uint256 id = predict.createMarket(_defaultMarket());
+        _minePastClose(id);
+        _execute(1, 0);
+
+        RitualPredict.Market memory m = predict.getMarket(id);
+        assertEq(m.attempts, 1);
+        assertEq(
+            uint8(m.state),
+            uint8(RitualPredict.MarketState.Resolving)
+        );
+    }
+
+    function test_EmptyNoSideBecomesInvalid() public {
+        RitualPredict.NewMarket memory p = _defaultMarket();
+        p.target = 4000;
+        p.comparator = RitualPredict.Comparator.GT;
+
+        uint256 id = predict.createMarket(p);
+
+        vm.prank(alice);
+        predict.bet{value: 1 ether}(id, true);
+
+        _minePastClose(id);
+        _execute(1, 0);
+
+        RitualPredict.Market memory m = predict.getMarket(id);
+        assertEq(
+            uint8(m.state),
+            uint8(RitualPredict.MarketState.Invalid)
+        );
+        assertEq(
+            uint8(m.outcome),
+            uint8(RitualPredict.Outcome.No)
+        );
+        assertEq(m.invalidReason, "no NO winners");
+
+        uint256 before = alice.balance;
+
+        vm.prank(alice);
+        predict.claimRefund(id);
+
+        assertEq(alice.balance, before + 1 ether);
+    }
+
+    function test_LosingBettorCannotClaimWinnings() public {
+        uint256 id = predict.createMarket(_defaultMarket());
+
+        vm.prank(alice);
+        predict.bet{value: 1 ether}(id, true);
+
+        vm.prank(bob);
+        predict.bet{value: 1 ether}(id, false);
+
+        _minePastClose(id);
+        _execute(1, 0);
+
+        vm.prank(bob);
+        vm.expectRevert(RitualPredict.NothingToClaim.selector);
+        predict.claimWinnings(id);
+    }
+
+    function test_DoubleRefundReverts() public {
+        uint256 id = predict.createMarket(_defaultMarket());
+
+        vm.prank(alice);
+        predict.bet{value: 1 ether}(id, false);
+
+        _minePastClose(id);
+        _execute(1, 0);
+
+        vm.prank(alice);
+        predict.claimRefund(id);
+
+        vm.prank(alice);
+        vm.expectRevert(RitualPredict.AlreadySettled.selector);
+        predict.claimRefund(id);
+    }
+
+    function test_ClaimRefundNothingToClaimReverts() public {
+        uint256 id = predict.createMarket(_defaultMarket());
+
+        vm.prank(alice);
+        predict.bet{value: 1 ether}(id, false);
+
+        _minePastClose(id);
+        _execute(1, 0);
+
+        vm.prank(bob);
+        vm.expectRevert(RitualPredict.NothingToClaim.selector);
+        predict.claimRefund(id);
+    }
+
+    function test_StakesOfReportsClaimableWhenResolved() public {
+        uint256 id = predict.createMarket(_defaultMarket());
+
+        vm.prank(alice);
+        predict.bet{value: 1 ether}(id, true);
+
+        vm.prank(bob);
+        predict.bet{value: 1 ether}(id, false);
+
+        _minePastClose(id);
+        _execute(1, 0);
+
+        (
+            ,
+            ,
+            bool aliceSettled,
+            uint256 aliceClaimable
+        ) = predict.stakesOf(id, alice);
+
+        (
+            ,
+            ,
+            bool bobSettled,
+            uint256 bobClaimable
+        ) = predict.stakesOf(id, bob);
+
+        assertFalse(aliceSettled);
+        assertEq(aliceClaimable, 2 ether);
+
+        assertFalse(bobSettled);
+        assertEq(bobClaimable, 0);
+    }
+
+    function test_StakesOfReportsClaimableWhenInvalid() public {
+        uint256 id = predict.createMarket(_defaultMarket());
+
+        vm.prank(alice);
+        predict.bet{value: 1 ether}(id, false);
+
+        _minePastClose(id);
+        _execute(1, 0);
+
+        (
+            uint256 yes,
+            uint256 no,
+            bool settled_,
+            uint256 claimable
+        ) = predict.stakesOf(id, alice);
+
+        assertEq(yes, 0);
+        assertEq(no, 1 ether);
+        assertFalse(settled_);
+        assertEq(claimable, 1 ether);
+    }
+
+    function test_FundExecutionRejectsZeroValue() public {
+        vm.expectRevert(RitualPredict.ZeroStake.selector);
+        predict.fundExecution(100);
+    }
+
+    function test_FundExecutionIncreasesBalance() public {
+        uint256 before = predict.executionBalance();
+
+        predict.fundExecution{value: 1 ether}(100);
+
+        uint256 afterFunding = predict.executionBalance();
+
+        assertGt(afterFunding, before);
+    }
+
+    function test_StakesOfReturnsZeroAfterSettlement() public {
+        uint256 id = predict.createMarket(_defaultMarket());
+
+        vm.prank(alice);
+        predict.bet{value: 1 ether}(id, true);
+
+        vm.prank(bob);
+        predict.bet{value: 1 ether}(id, false);
+
+        _minePastClose(id);
+        _execute(1, 0);
+
+        vm.prank(alice);
+        predict.claimWinnings(id);
+
+        (
+            uint256 yes,
+            uint256 no,
+            bool alreadySettled,
+            uint256 claimable
+        ) = predict.stakesOf(id, alice);
+
+        assertEq(yes, 1 ether);
+        assertEq(no, 0);
+        assertTrue(alreadySettled);
+        assertEq(claimable, 0);
+    }
+
+    function test_JqFailureRecordsAttempt() public {
+        vm.etch(RitualChain.JQ_PRECOMPILE, hex"");
+
+        uint256 id = predict.createMarket(_defaultMarket());
+
+        _minePastClose(id);
+        _execute(1, 0);
+
+        RitualPredict.Market memory m = predict.getMarket(id);
+
+        assertEq(m.attempts, 1);
+        assertEq(
+            uint8(m.state),
+            uint8(RitualPredict.MarketState.Resolving)
+        );
+    }
+
+    function test_HttpPrecompileFailureRecordsAttempt() public {
+        vm.etch(RitualChain.HTTP_PRECOMPILE, hex"");
+
+        uint256 id = predict.createMarket(_defaultMarket());
+        _minePastClose(id);
+        _execute(1, 0);
+
+        RitualPredict.Market memory m = predict.getMarket(id);
+
+        assertEq(m.attempts, 1);
+        assertEq(
+            uint8(m.state),
+            uint8(RitualPredict.MarketState.Resolving)
+        );
+    }
+
+    function test_HttpMalformedResponseRecordsAttempt() public {
+        MockHTTPMalformed malformed = new MockHTTPMalformed();
+
+        vm.etch(
+            RitualChain.HTTP_PRECOMPILE,
+            address(malformed).code
+        );
+
+        uint256 id = predict.createMarket(_defaultMarket());
+        _minePastClose(id);
+        _execute(1, 0);
+
+        RitualPredict.Market memory m = predict.getMarket(id);
+
+        assertEq(m.attempts, 1);
+        assertEq(
+            uint8(m.state),
+            uint8(RitualPredict.MarketState.Resolving)
+        );
+    }
+
+    function test_HttpErrorMessageRecordsAttempt() public {
+        MockHTTPError errorMock = new MockHTTPError();
+
+        vm.etch(
+            RitualChain.HTTP_PRECOMPILE,
+            address(errorMock).code
+        );
+
+        uint256 id = predict.createMarket(_defaultMarket());
+        _minePastClose(id);
+        _execute(1, 0);
+
+        RitualPredict.Market memory m = predict.getMarket(id);
+
+        assertEq(m.attempts, 1);
+        assertEq(
+            uint8(m.state),
+            uint8(RitualPredict.MarketState.Resolving)
+        );
+    }
+
+    function test_HttpNon2xxRecordsAttempt() public {
+        MockHTTPNon2xx non2xx = new MockHTTPNon2xx();
+
+        vm.etch(
+            RitualChain.HTTP_PRECOMPILE,
+            address(non2xx).code
+        );
+
+        uint256 id = predict.createMarket(_defaultMarket());
+        _minePastClose(id);
+        _execute(1, 0);
+
+        RitualPredict.Market memory m = predict.getMarket(id);
+
+        assertEq(m.attempts, 1);
+        assertEq(
+            uint8(m.state),
+            uint8(RitualPredict.MarketState.Resolving)
+        );
+    }
+
+    function test_HttpEmptyBodyRecordsAttempt() public {
+        MockHTTPEmptyBody emptyBody = new MockHTTPEmptyBody();
+
+        vm.etch(
+            RitualChain.HTTP_PRECOMPILE,
+            address(emptyBody).code
+        );
+
+        uint256 id = predict.createMarket(_defaultMarket());
+        _minePastClose(id);
+        _execute(1, 0);
+
+        RitualPredict.Market memory m = predict.getMarket(id);
+
+        assertEq(m.attempts, 1);
+        assertEq(
+            uint8(m.state),
+            uint8(RitualPredict.MarketState.Resolving)
+        );
+    }
 }
+
+contract MockTEENotFound {
+    function pickServiceByCapability(
+        uint8,
+        bool,
+        uint256,
+        uint256
+    ) external pure returns (address, bool) {
+        return (address(0), false);
+    }
+}
+
+contract MockHTTPEmptyBody {
+    fallback() external {
+        bytes memory actualOutput = abi.encode(
+            uint16(200),
+            new string[](0),
+            new string[](0),
+            bytes(""),
+            string("")
+        );
+
+        bytes memory response = abi.encode(
+            bytes(""),
+            actualOutput
+        );
+
+        assembly {
+            return(add(response, 32), mload(response))
+        }
+    }
+}
+
+contract MockHTTPRevert {
+    fallback() external {
+        revert("HTTP failure");
+    }
+}
+
+contract MockHTTPMalformed {
+    fallback() external {
+        bytes memory response = hex"1234";
+        assembly {
+            return(add(response, 32), mload(response))
+        }
+    }
+}
+
+contract MockHTTPError {
+    fallback() external {
+        bytes memory actualOutput = abi.encode(
+            uint16(200),
+            new string[](0),
+            new string[](0),
+            bytes('{"price":3500}'),
+            string("upstream error")
+        );
+
+        bytes memory response = abi.encode(
+            bytes(""),
+            actualOutput
+        );
+
+        assembly {
+            return(add(response, 32), mload(response))
+        }
+    }
+}
+
+contract MockHTTPNon2xx {
+    fallback() external {
+        bytes memory actualOutput = abi.encode(
+            uint16(500),
+            new string[](0),
+            new string[](0),
+            bytes('{"price":3500}'),
+            string("")
+        );
+
+        bytes memory response = abi.encode(
+            bytes(""),
+            actualOutput
+        );
+
+        assembly {
+            return(add(response, 32), mload(response))
+        }
+    }
+}
+
