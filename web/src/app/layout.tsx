@@ -27,22 +27,22 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en" className={`${inter.variable} ${spaceGrotesk.variable}`}>
       <body className="min-h-screen antialiased">
         <header className="sticky top-0 z-40 border-b border-[var(--line)] bg-[var(--bg)]/85 backdrop-blur-md">
-          <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-3">
+          <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-3">
             <Link href="/" className="flex items-center gap-3">
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--teal)]/40 bg-[var(--teal)]/10 text-sm font-bold text-[var(--teal)] shadow-[0_0_16px_-4px_rgba(62,224,197,0.6)]">
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[var(--teal)]/40 bg-[var(--teal)]/10 text-sm font-bold text-[var(--teal)] shadow-[0_0_16px_-4px_rgba(62,224,197,0.6)]">
                 R
               </div>
-              <div>
+              <div className="min-w-0">
                 <div className="heading text-sm font-semibold tracking-wide">
                   RitualPredict
                 </div>
-                <div className="text-[11px] text-[var(--muted)]">
+                <div className="hidden text-[11px] text-[var(--muted)] sm:block">
                   Self-resolving · pari-mutuel · on-chain oracle path
                 </div>
               </div>
             </Link>
 
-            <nav className="flex items-center gap-1 text-sm">
+            <nav className="flex flex-wrap items-center gap-1 text-sm">
               <Link
                 href="/"
                 className="rounded-full px-3 py-1.5 text-[var(--muted)] transition hover:bg-white/5 hover:text-[var(--text)]"

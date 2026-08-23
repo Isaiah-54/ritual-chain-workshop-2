@@ -61,7 +61,7 @@ export function ResolutionConsole({ market }: { market: Market }) {
   }
 
   return (
-    <div className="panel overflow-hidden">
+    <div className="panel overflow-hidden max-w-full">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--line)] px-4 py-3">
         <div>
           <div className="text-[11px] uppercase tracking-[0.18em] text-[var(--muted)]">
@@ -86,16 +86,16 @@ export function ResolutionConsole({ market }: { market: Market }) {
           </button>
         </div>
       </div>
-      <div className="max-h-72 overflow-y-auto bg-black/40 px-4 py-3 font-mono text-[12px] leading-6">
+      <div className="max-h-72 overflow-y-auto overflow-x-hidden bg-black/40 px-4 py-3 font-mono text-[12px] leading-6">
         {visible.length === 0 && !running && (
           <div className="text-[var(--muted)]">
             Stream Scheduler → TEE → HTTP → jq → compare · same path as Hardhat tests.
           </div>
         )}
         {visible.map((line, i) => (
-          <div key={`${line.t}-${i}`} className="flex gap-3">
+          <div key={`${line.t}-${i}`} className="flex gap-3 min-w-0">
             <span className="shrink-0 text-[var(--muted)]/70">{line.t}</span>
-            <span className={levelClass[line.level]}>{line.msg}</span>
+            <span className={`${levelClass[line.level]} min-w-0 flex-1 whitespace-pre-wrap break-words`}>{line.msg}</span>
           </div>
         ))}
         {running && <div className="mt-1 animate-pulse text-[var(--teal)]">▌ executing…</div>}
