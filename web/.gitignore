@@ -1,7 +1,4 @@
 node_modules
 .next
-.env.local
+out
 .env*.local
-.vercel
-next-env.d.ts
-

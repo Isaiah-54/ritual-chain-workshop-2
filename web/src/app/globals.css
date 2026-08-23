@@ -1,0 +1,49 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: #05070a;
+  --panel: #0c1017;
+  --panel-2: #111822;
+  --line: #1c2533;
+  --text: #e8edf5;
+  --muted: #8b97a8;
+  --teal: #3ee0c5;
+  --violet: #9b8cff;
+  --amber: #f0b429;
+  --rose: #f07178;
+  --green: #5ddea3;
+}
+
+html, body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+.grid-bg {
+  background-image:
+    linear-gradient(rgba(62, 224, 197, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(62, 224, 197, 0.04) 1px, transparent 1px);
+  background-size: 48px 48px;
+}
+
+.panel {
+  background: linear-gradient(180deg, var(--panel-2), var(--panel));
+  border: 1px solid var(--line);
+  border-radius: 16px;
+}
+
+.pill {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}

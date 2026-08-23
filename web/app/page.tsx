@@ -1,178 +1,291 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 
-type MarketState = "OPEN" | "RESOLVED" | "CLOSING";
+type MarketState = "OPEN" | "CLOSING" | "RESOLVED";
 
 type Market = {
-  id: string;
+  id: number;
   category: string;
   question: string;
   yes: number;
   no: number;
-  volume: string;
-  liquidity: string;
-  resolution: string;
-  oracle: string;
-  path: string;
-  target: string;
-  observed: string;
+  volume: number;
+  liquidity: number;
   state: MarketState;
-  result?: "YES" | "NO";
+  resolution: string;
+  observed: string;
+  comparator: string;
+  target: string;
+  jsonPath: string;
+  oracle: string;
 };
 
-const markets: Market[] = [
+type Activity = {
+  id: number;
+  market: string;
+  side: "YES" | "NO";
+  amount: number;
+  time: string;
+};
+
+const INITIAL_MARKETS: Market[] = [
   {
-    id: "#001",
+    id: 1,
     category: "CRYPTO",
     question: "Will ETH price be ≥ $4,000?",
     yes: 64,
     no: 36,
-    volume: "$842.6K",
-    liquidity: "$218.4K",
-    resolution: "Resolved",
-    oracle: "price-feed.eth",
-    path: "price",
-    target: "$4,000",
-    observed: "$4,126",
+    volume: 842600,
+    liquidity: 218400,
     state: "RESOLVED",
-    result: "YES",
+    resolution: "Resolved",
+    observed: "4126",
+    comparator: "≥",
+    target: "4000",
+    jsonPath: ".price",
+    oracle: "api.example.com/eth",
   },
   {
-    id: "#002",
+    id: 2,
     category: "CRYPTO",
     question: "Will BTC price be ≥ $120,000?",
     yes: 41,
     no: 59,
-    volume: "$1.24M",
-    liquidity: "$394.8K",
-    resolution: "Resolved",
-    oracle: "price-feed.btc",
-    path: "price",
-    target: "$120,000",
-    observed: "$118,420",
+    volume: 1240000,
+    liquidity: 394800,
     state: "RESOLVED",
-    result: "NO",
+    resolution: "Resolved",
+    observed: "118420",
+    comparator: "≥",
+    target: "120000",
+    jsonPath: ".price",
+    oracle: "api.example.com/btc",
   },
   {
-    id: "#003",
+    id: 3,
     category: "NETWORK",
     question: "Will ETH gas be < 20 gwei?",
     yes: 57,
     no: 43,
-    volume: "$126.8K",
-    liquidity: "$48.2K",
-    resolution: "2h 14m",
-    oracle: "network-gas.eth",
-    path: "gas",
-    target: "20 gwei",
-    observed: "14 gwei",
+    volume: 126800,
+    liquidity: 48200,
     state: "OPEN",
+    resolution: "2h 14m",
+    observed: "14",
+    comparator: "<",
+    target: "20",
+    jsonPath: ".gas",
+    oracle: "api.example.com/gas",
   },
   {
-    id: "#004",
+    id: 4,
     category: "CRYPTO",
     question: "Will SOL price be ≥ $210?",
     yes: 48,
     no: 52,
-    volume: "$317.2K",
-    liquidity: "$91.6K",
-    resolution: "5h 42m",
-    oracle: "price-feed.sol",
-    path: "price",
-    target: "$210",
-    observed: "$204.17",
+    volume: 317200,
+    liquidity: 91600,
     state: "OPEN",
+    resolution: "5h 42m",
+    observed: "204",
+    comparator: "≥",
+    target: "210",
+    jsonPath: ".price",
+    oracle: "api.example.com/sol",
   },
   {
-    id: "#005",
+    id: 5,
     category: "NETWORK",
     question: "Will Bitcoin mempool fees exceed 25 sat/vB?",
     yes: 33,
     no: 67,
-    volume: "$94.7K",
-    liquidity: "$31.5K",
-    resolution: "Closing",
-    oracle: "network.btc",
-    path: "feeRate",
-    target: "25 sat/vB",
-    observed: "18 sat/vB",
+    volume: 94700,
+    liquidity: 31500,
     state: "CLOSING",
+    resolution: "Closing",
+    observed: "21",
+    comparator: ">",
+    target: "25",
+    jsonPath: ".fee",
+    oracle: "api.example.com/mempool",
   },
 ];
 
-const activity = [
-  ["ETH ≥ $4,000", "YES", "$420", "2m ago"],
-  ["BTC ≥ $120,000", "NO", "$1,250", "5m ago"],
-  ["ETH gas < 20", "YES", "$85", "8m ago"],
-  ["SOL ≥ $210", "NO", "$300", "11m ago"],
-  ["BTC fees > 25", "NO", "$720", "14m ago"],
-];
-
-const stages = [
+const PIPELINE = [
   {
     number: "01",
-    short: "SCHED",
-    name: "Scheduler",
-    icon: "◷",
+    code: "SCHED",
+    title: "Scheduler",
     description: "Resolution job triggered",
+    icon: "◷",
   },
   {
     number: "02",
-    short: "TEE",
-    name: "TEE",
+    code: "TEE",
+    title: "TEE",
+    description: "Execution environment verified",
     icon: "◇",
-    description: "Trusted execution initialized",
   },
   {
     number: "03",
-    short: "HTTP",
-    name: "HTTP",
-    icon: "↗",
+    code: "HTTP",
+    title: "HTTP",
     description: "External oracle response received",
+    icon: "↗",
   },
   {
     number: "04",
-    short: "jq",
-    name: "jq",
+    code: "jq",
+    title: "jq",
+    description: "Required value extracted",
     icon: "⌘",
-    description: "Value extracted from JSON",
   },
   {
     number: "05",
-    short: "CMP",
-    name: "Comparator",
-    icon: "≥",
+    code: "CMP",
+    title: "Comparator",
     description: "Target condition evaluated",
+    icon: "≥",
   },
   {
     number: "06",
-    short: "RES",
-    name: "Resolution",
-    icon: "✓",
+    code: "RES",
+    title: "Resolution",
     description: "YES / NO outcome finalized",
+    icon: "✓",
   },
   {
     number: "07",
-    short: "PAY",
-    name: "Settlement",
+    code: "PAY",
+    title: "Settlement",
+    description: "Winning positions become eligible",
     icon: "₿",
-    description: "Payout or refund becomes available",
   },
 ];
 
-function StatusDot({ active = true }: { active?: boolean }) {
-  return (
-    <span className={`status-dot ${active ? "active" : ""}`}>
-      <span />
-    </span>
-  );
+const INITIAL_ACTIVITY: Activity[] = [
+  { id: 1, market: "ETH ≥ $4,000", side: "YES", amount: 420, time: "12:41:08" },
+  { id: 2, market: "BTC ≥ $120,000", side: "NO", amount: 1250, time: "12:40:54" },
+  { id: 3, market: "ETH gas < 20", side: "YES", amount: 85, time: "12:40:41" },
+  { id: 4, market: "SOL ≥ $210", side: "NO", amount: 300, time: "12:40:29" },
+  { id: 5, market: "BTC fees > 25", side: "NO", amount: 720, time: "12:40:12" },
+];
+
+function money(value: number) {
+  if (value >= 1_000_000) {
+    return `$${(value / 1_000_000).toFixed(2)}M`;
+  }
+
+  if (value >= 1_000) {
+    return `$${(value / 1_000).toFixed(1)}K`;
+  }
+
+  return `$${value.toFixed(0)}`;
 }
 
-function Header() {
+function marketStatusClass(state: MarketState) {
+  if (state === "OPEN") return "status-open";
+  if (state === "CLOSING") return "status-closing";
+  return "status-resolved";
+}
+
+export default function Home() {
+  const [markets, setMarkets] = useState<Market[]>(INITIAL_MARKETS);
+  const [selectedId, setSelectedId] = useState(3);
+  const [filter, setFilter] = useState<"ALL" | MarketState>("ALL");
+  const [side, setSide] = useState<"YES" | "NO">("YES");
+  const [stake, setStake] = useState("0.50");
+  const [pipelineStep, setPipelineStep] = useState(4);
+  const [activity, setActivity] = useState<Activity[]>(INITIAL_ACTIVITY);
+  const [notice, setNotice] = useState("");
+
+  const selected =
+    markets.find((market) => market.id === selectedId) ?? markets[0];
+
+  const filteredMarkets = useMemo(() => {
+    if (filter === "ALL") return markets;
+    return markets.filter((market) => market.state === filter);
+  }, [filter, markets]);
+
+  const totalVolume = markets.reduce((sum, market) => sum + market.volume, 0);
+
+  function simulateBet() {
+    const amount = Number(stake);
+
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setNotice("Enter a valid simulated position size.");
+      return;
+    }
+
+    const activityItem: Activity = {
+      id: Date.now(),
+      market: selected.question.replace("Will ", ""),
+      side,
+      amount: amount * 1000,
+      time: new Date().toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+      }),
+    };
+
+    setActivity((items) => [activityItem, ...items].slice(0, 8));
+
+    setMarkets((items) =>
+      items.map((market) => {
+        if (market.id !== selected.id) return market;
+
+        const extraVolume = amount * 1000;
+
+        return {
+          ...market,
+          volume: market.volume + extraVolume,
+          liquidity: market.liquidity + amount * 250,
+          yes:
+            side === "YES"
+              ? Math.min(99, market.yes + 1)
+              : Math.max(1, market.yes - 1),
+          no:
+            side === "NO"
+              ? Math.min(99, market.no + 1)
+              : Math.max(1, market.no - 1),
+        };
+      }),
+    );
+
+    setNotice(
+      `Simulated ${side} position submitted · ${amount.toFixed(
+        2,
+      )} ETH · no blockchain transaction`,
+    );
+  }
+
+  function simulateResolution() {
+    setPipelineStep(0);
+    setNotice("Resolution engine started · processing market #001");
+
+    let step = 0;
+
+    const timer = window.setInterval(() => {
+      step += 1;
+      setPipelineStep(step);
+
+      if (step >= PIPELINE.length - 1) {
+        window.clearInterval(timer);
+        setNotice(
+          "Resolution completed · market #001 resolved YES · settlement eligible",
+        );
+      }
+    }, 650);
+  }
+
   return (
-    <header className="site-header">
-      <div className="header-inner">
+    <main className="site-shell">
+      <div className="ambient ambient-one" />
+      <div className="ambient ambient-two" />
+
+      <nav className="navbar">
         <a href="#" className="brand">
           <span className="brand-mark">R</span>
           <span>
@@ -181,598 +294,441 @@ function Header() {
           </span>
         </a>
 
-        <nav>
+        <div className="nav-links">
           <a href="#markets">Markets</a>
-          <a href="#activity">Activity</a>
           <a href="#protocol">Protocol</a>
-          <a href="#about">About</a>
-        </nav>
-
-        <div className="header-status">
-          <StatusDot />
-          <span>Network operational</span>
-        </div>
-      </div>
-    </header>
-  );
-}
-
-function Hero() {
-  return (
-    <section className="hero">
-      <div className="hero-copy">
-        <div className="eyebrow">
-          <StatusDot />
-          SIMULATION ENVIRONMENT · NO LIVE SETTLEMENT
+          <a href="#activity">Activity</a>
         </div>
 
-        <h1>
-          Trade the future.
-          <br />
-          <span>Verify the outcome.</span>
-        </h1>
-
-        <p>
-          RitualPredict is a prediction-market interface demonstrating how
-          external information can travel through a programmable resolution
-          pipeline before producing a deterministic market outcome.
-        </p>
-
-        <div className="hero-actions">
-          <a href="#markets" className="button primary">
-            Explore markets <span>↓</span>
-          </a>
-          <a href="#protocol" className="button secondary">
-            View protocol
-          </a>
+        <div className="nav-status">
+          <span className="pulse" />
+          SIMULATION ENVIRONMENT
         </div>
-      </div>
+      </nav>
 
-      <div className="hero-terminal">
-        <div className="terminal-top">
-          <div>
-            <span className="terminal-light" />
-            <span className="terminal-light" />
-            <span className="terminal-light" />
-          </div>
-          <span>RESOLUTION ENGINE</span>
-          <span>LIVE</span>
-        </div>
-
-        <div className="terminal-content">
-          <div className="terminal-label">CURRENT EXECUTION</div>
-          <div className="terminal-market">
-            MARKET <strong>#001</strong>
+      <section className="hero">
+        <div className="hero-copy">
+          <div className="eyebrow">
+            RITUAL CHAIN / ACADEMY PROJECT
+            <span>NO LIVE SETTLEMENT</span>
           </div>
 
-          <div className="terminal-question">
+          <h1>
+            Trade the future.
+            <br />
+            <em>Verify the outcome.</em>
+          </h1>
+
+          <p className="hero-text">
+            RitualPredict demonstrates how external information travels
+            through a programmable resolution pipeline before producing a
+            deterministic market outcome.
+          </p>
+
+          <div className="hero-actions">
+            <a className="button button-primary" href="#markets">
+              Explore markets <span>↓</span>
+            </a>
+            <a className="button button-secondary" href="#protocol">
+              View protocol
+            </a>
+          </div>
+        </div>
+
+        <div className="execution-card">
+          <div className="card-topline">
+            <span>RESOLUTION ENGINE</span>
+            <span className="live-badge">
+              <i /> ONLINE
+            </span>
+          </div>
+
+          <div className="execution-title">
+            <span>CURRENT EXECUTION</span>
+            <strong>MARKET #001</strong>
+          </div>
+
+          <div className="execution-question">
             Will ETH price be ≥ $4,000?
           </div>
 
-          <div className="terminal-flow">
-            {stages.map((stage, index) => (
-              <div className="terminal-stage" key={stage.short}>
-                <span>{stage.icon}</span>
-                <div>
-                  <small>{stage.short}</small>
-                  <strong>{stage.name}</strong>
-                </div>
-                {index < stages.length - 1 && <i>→</i>}
+          <div className="mini-pipeline">
+            {PIPELINE.map((step, index) => (
+              <div className="mini-step" key={step.code}>
+                <span className="mini-icon">{step.icon}</span>
+                <small>{step.code}</small>
+                {index < PIPELINE.length - 1 && <b>→</b>}
               </div>
             ))}
           </div>
 
-          <div className="terminal-result">
+          <div className="execution-result">
             <div>
-              <small>OBSERVED VALUE</small>
+              <span>OBSERVED VALUE</span>
               <strong>4,126</strong>
             </div>
             <div>
-              <small>COMPARATOR</small>
+              <span>COMPARATOR</span>
               <strong>≥ 4,000</strong>
             </div>
-            <div className="result-yes">
-              <small>OUTCOME</small>
-              <strong>YES</strong>
+            <div>
+              <span>OUTCOME</span>
+              <strong className="yes-text">YES</strong>
             </div>
           </div>
         </div>
-      </div>
-    </section>
-  );
-}
+      </section>
 
-function Stats() {
-  return (
-    <section className="stats">
-      <div>
-        <span>SIMULATED VOLUME</span>
-        <strong>$2.62M</strong>
-        <small>Across all markets</small>
-      </div>
-      <div>
-        <span>ACTIVE MARKETS</span>
-        <strong>03</strong>
-        <small>Currently trading</small>
-      </div>
-      <div>
-        <span>RESOLUTIONS</span>
-        <strong>184</strong>
-        <small>Successfully processed</small>
-      </div>
-      <div>
-        <span>RESOLUTION ENGINE</span>
-        <strong>TEE</strong>
-        <small>Deterministic execution</small>
-      </div>
-    </section>
-  );
-}
-
-function MarketCard({
-  market,
-  selected,
-  onSelect,
-}: {
-  market: Market;
-  selected: boolean;
-  onSelect: () => void;
-}) {
-  return (
-    <button
-      className={`market-card ${selected ? "selected" : ""}`}
-      onClick={onSelect}
-    >
-      <div className="market-card-top">
-        <span className="market-id">{market.id}</span>
-        <span className={`market-state ${market.state.toLowerCase()}`}>
-          <StatusDot active={market.state !== "RESOLVED"} />
-          {market.state}
-        </span>
-      </div>
-
-      <span className="market-category">{market.category}</span>
-
-      <h3>{market.question}</h3>
-
-      <div className="probability">
-        <div className="probability-header">
-          <span>YES</span>
-          <strong>{market.yes}%</strong>
-          <span>NO</span>
-          <strong>{market.no}%</strong>
-        </div>
-        <div className="probability-bar">
-          <div style={{ width: `${market.yes}%` }} />
-        </div>
-      </div>
-
-      <div className="market-meta">
+      <section className="stats-strip">
         <div>
-          <span>VOLUME</span>
-          <strong>{market.volume}</strong>
+          <span>SIMULATED VOLUME</span>
+          <strong>{money(totalVolume)}</strong>
+          <small>Across all markets</small>
         </div>
         <div>
-          <span>LIQUIDITY</span>
-          <strong>{market.liquidity}</strong>
+          <span>ACTIVE MARKETS</span>
+          <strong>03</strong>
+          <small>Currently trading</small>
         </div>
         <div>
-          <span>RESOLUTION</span>
-          <strong>{market.resolution}</strong>
+          <span>RESOLUTIONS</span>
+          <strong>184</strong>
+          <small>Successfully processed</small>
         </div>
-      </div>
-    </button>
-  );
-}
-
-function TradingPanel({ market }: { market: Market }) {
-  const [side, setSide] = useState<"YES" | "NO">("YES");
-  const [amount, setAmount] = useState("100");
-  const [message, setMessage] = useState("");
-
-  const probability = side === "YES" ? market.yes : market.no;
-
-  function simulateTrade() {
-    setMessage(
-      `Simulated ${side} position of $${amount} placed successfully.`
-    );
-  }
-
-  return (
-    <div className="trading-panel">
-      <div className="panel-heading">
         <div>
-          <span>MARKET {market.id}</span>
-          <h2>{market.question}</h2>
+          <span>EXECUTION ENGINE</span>
+          <strong>TEE</strong>
+          <small>Deterministic execution</small>
         </div>
-        <span className={`pill ${market.state.toLowerCase()}`}>
-          {market.state}
-        </span>
-      </div>
+      </section>
 
-      <div className="trade-tabs">
-        <button
-          className={side === "YES" ? "yes active" : "yes"}
-          onClick={() => setSide("YES")}
-        >
-          YES
-          <strong>{market.yes}¢</strong>
-        </button>
-        <button
-          className={side === "NO" ? "no active" : "no"}
-          onClick={() => setSide("NO")}
-        >
-          NO
-          <strong>{market.no}¢</strong>
-        </button>
-      </div>
-
-      <div className="trade-form">
-        <label>
-          <span>POSITION SIZE</span>
-          <div className="amount-input">
-            <span>$</span>
-            <input
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-              inputMode="decimal"
-            />
-          </div>
-        </label>
-
-        <div className="trade-preview">
+      <section id="markets" className="section">
+        <div className="section-heading">
           <div>
-            <span>EST. PROBABILITY</span>
-            <strong>{probability}%</strong>
+            <span className="section-number">01 / MARKETS</span>
+            <h2>Prediction markets.</h2>
+            <p>
+              Markets where probabilities become positions and external data
+              determines the final outcome.
+            </p>
           </div>
-          <div>
-            <span>MAX PAYOUT</span>
-            <strong>
-              ${amount && !Number.isNaN(Number(amount))
-                ? (Number(amount) / (probability / 100)).toFixed(2)
-                : "0.00"}
-            </strong>
+
+          <div className="filters">
+            {(["ALL", "OPEN", "CLOSING", "RESOLVED"] as const).map(
+              (item) => (
+                <button
+                  key={item}
+                  className={filter === item ? "filter active" : "filter"}
+                  onClick={() => setFilter(item)}
+                >
+                  {item}
+                </button>
+              ),
+            )}
           </div>
         </div>
 
-        <button
-          className={`trade-button ${side === "YES" ? "trade-yes" : "trade-no"}`}
-          onClick={simulateTrade}
-          disabled={market.state === "RESOLVED"}
-        >
-          {market.state === "RESOLVED"
-            ? "Market resolved"
-            : `Buy ${side}`}
-        </button>
+        <div className="market-layout">
+          <div className="market-list">
+            {filteredMarkets.map((market) => (
+              <button
+                key={market.id}
+                className={
+                  selected.id === market.id
+                    ? "market-card selected"
+                    : "market-card"
+                }
+                onClick={() => setSelectedId(market.id)}
+              >
+                <div className="market-header">
+                  <span className="market-id">
+                    #{String(market.id).padStart(3, "0")}
+                  </span>
+                  <span className={`status ${marketStatusClass(market.state)}`}>
+                    {market.state}
+                  </span>
+                  <span className="category">{market.category}</span>
+                </div>
 
-        <small className="trade-note">
-          Simulation only · No wallet or blockchain transaction
-        </small>
+                <h3>{market.question}</h3>
 
-        {message && <div className="trade-message">{message}</div>}
-      </div>
-    </div>
-  );
-}
+                <div className="probability-bar">
+                  <span style={{ width: `${market.yes}%` }} />
+                </div>
 
-function MarketsSection() {
-  const [selectedId, setSelectedId] = useState("#003");
-  const [filter, setFilter] = useState("ALL");
+                <div className="market-probabilities">
+                  <span>
+                    YES <strong>{market.yes}%</strong>
+                  </span>
+                  <span>
+                    NO <strong>{market.no}%</strong>
+                  </span>
+                </div>
 
-  const filtered = useMemo(() => {
-    if (filter === "ALL") return markets;
-    return markets.filter((market) => market.state === filter);
-  }, [filter]);
+                <div className="market-meta">
+                  <span>
+                    VOLUME <strong>{money(market.volume)}</strong>
+                  </span>
+                  <span>
+                    LIQUIDITY <strong>{money(market.liquidity)}</strong>
+                  </span>
+                  <span>
+                    RESOLUTION <strong>{market.resolution}</strong>
+                  </span>
+                </div>
+              </button>
+            ))}
+          </div>
 
-  const selected =
-    markets.find((market) => market.id === selectedId) ?? markets[0];
+          <aside className="trade-panel">
+            <div className="panel-label">
+              MARKET #{String(selected.id).padStart(3, "0")}
+              <span className={`status ${marketStatusClass(selected.state)}`}>
+                {selected.state}
+              </span>
+            </div>
 
-  return (
-    <section id="markets" className="section markets-section">
-      <div className="section-heading">
-        <div>
-          <div className="section-number">01 / MARKETS</div>
-          <h2>Prediction markets.</h2>
-          <p>
-            Markets where probabilities become positions and external data
-            determines the final outcome.
-          </p>
-        </div>
+            <h3>{selected.question}</h3>
 
-        <div className="market-filters">
-          {["ALL", "OPEN", "CLOSING", "RESOLVED"].map((item) => (
+            <div className="price-grid">
+              <button
+                className={side === "YES" ? "price-card yes selected" : "price-card yes"}
+                onClick={() => setSide("YES")}
+              >
+                <span>YES</span>
+                <strong>{selected.yes}¢</strong>
+                <small>{selected.yes}% probability</small>
+              </button>
+
+              <button
+                className={side === "NO" ? "price-card no selected" : "price-card no"}
+                onClick={() => setSide("NO")}
+              >
+                <span>NO</span>
+                <strong>{selected.no}¢</strong>
+                <small>{selected.no}% probability</small>
+              </button>
+            </div>
+
+            <label className="input-label">POSITION SIZE</label>
+
+            <div className="stake-input">
+              <span>ETH</span>
+              <input
+                value={stake}
+                onChange={(event) => setStake(event.target.value)}
+                inputMode="decimal"
+                placeholder="0.50"
+              />
+            </div>
+
+            <div className="trade-summary">
+              <div>
+                <span>EST. PROBABILITY</span>
+                <strong>{side === "YES" ? selected.yes : selected.no}%</strong>
+              </div>
+              <div>
+                <span>MAX PAYOUT</span>
+                <strong>
+                  {Number(stake || 0) > 0
+                    ? (Number(stake) / ((side === "YES" ? selected.yes : selected.no) / 100)).toFixed(2)
+                    : "0.00"}{" "}
+                  ETH
+                </strong>
+              </div>
+            </div>
+
             <button
-              key={item}
-              className={filter === item ? "active" : ""}
-              onClick={() => setFilter(item)}
+              className="trade-button"
+              onClick={simulateBet}
+              disabled={selected.state !== "OPEN"}
             >
-              {item}
+              {selected.state === "OPEN"
+                ? `Buy ${side}`
+                : "Market not tradable"}
+            </button>
+
+            <p className="simulation-note">
+              Simulation only · No wallet connection · No blockchain
+              transaction.
+            </p>
+
+            {notice && <div className="notice">{notice}</div>}
+          </aside>
+        </div>
+      </section>
+
+      <section id="protocol" className="section protocol-section">
+        <div className="section-heading">
+          <div>
+            <span className="section-number">02 / PROTOCOL</span>
+            <h2>The resolution engine.</h2>
+            <p>
+              A programmable pipeline transforms external information into a
+              deterministic market result.
+            </p>
+          </div>
+
+          <button className="resolve-button" onClick={simulateResolution}>
+            Run simulated resolution
+          </button>
+        </div>
+
+        <div className="pipeline">
+          {PIPELINE.map((step, index) => (
+            <button
+              key={step.code}
+              className={
+                index <= pipelineStep
+                  ? "pipeline-step complete"
+                  : "pipeline-step"
+              }
+              onClick={() => setPipelineStep(index)}
+            >
+              <span className="pipeline-number">{step.number}</span>
+              <span className="pipeline-icon">{step.icon}</span>
+              <strong>{step.title}</strong>
+              <small>{step.code}</small>
+              <p>{step.description}</p>
             </button>
           ))}
         </div>
-      </div>
 
-      <div className="markets-layout">
-        <div className="market-list">
-          {filtered.map((market) => (
-            <MarketCard
-              key={market.id}
-              market={market}
-              selected={market.id === selectedId}
-              onSelect={() => setSelectedId(market.id)}
-            />
+        <div className="protocol-console">
+          <div className="console-header">
+            <span>PROTOCOL EXECUTION</span>
+            <span>MARKET #001 · RESOLUTION JOB</span>
+          </div>
+
+          <div className="console-body">
+            <div className="console-stage">
+              <span className="console-stage-number">
+                STEP {String(pipelineStep + 1).padStart(2, "0")}
+              </span>
+              <strong>{PIPELINE[pipelineStep].title}</strong>
+              <p>{PIPELINE[pipelineStep].description}</p>
+            </div>
+
+            <div className="console-data">
+              <div>
+                <span>INPUT</span>
+                <code>price = 4126</code>
+              </div>
+              <div>
+                <span>RULE</span>
+                <code>4126 ≥ 4000</code>
+              </div>
+              <div>
+                <span>STATUS</span>
+                <strong className="success">SUCCESS</strong>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="activity" className="section">
+        <div className="section-heading">
+          <div>
+            <span className="section-number">03 / ACTIVITY</span>
+            <h2>Market activity.</h2>
+            <p>
+              A local simulation of positions entering the prediction market.
+            </p>
+          </div>
+
+          <span className="activity-live">
+            <i /> LIVE SIMULATION
+          </span>
+        </div>
+
+        <div className="activity-table">
+          <div className="activity-row activity-head">
+            <span>MARKET</span>
+            <span>SIDE</span>
+            <span>SIZE</span>
+            <span>TIME</span>
+          </div>
+
+          {activity.map((item) => (
+            <div className="activity-row" key={item.id}>
+              <strong>{item.market}</strong>
+              <span className={item.side === "YES" ? "side-yes" : "side-no"}>
+                {item.side}
+              </span>
+              <span>{money(item.amount)}</span>
+              <span className="activity-time">{item.time}</span>
+            </div>
           ))}
         </div>
+      </section>
 
-        <TradingPanel market={selected} />
-      </div>
-    </section>
-  );
-}
-
-function ProtocolSection() {
-  const [active, setActive] = useState(4);
-
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setActive((current) => (current + 1) % stages.length);
-    }, 3500);
-
-    return () => clearInterval(timer);
-  }, []);
-
-  const stage = stages[active];
-
-  return (
-    <section id="protocol" className="section protocol-section">
-      <div className="section-heading">
-        <div>
-          <div className="section-number">02 / PROTOCOL</div>
-          <h2>The resolution engine.</h2>
-          <p>
-            A programmable pipeline transforms external information into a
-            deterministic market result.
-          </p>
+      <section className="resolution-section">
+        <div className="resolution-copy">
+          <span className="section-number">04 / RECENT RESOLUTION</span>
+          <h2>ETH price ≥ $4,000</h2>
+          <span className="status status-resolved">RESOLVED</span>
         </div>
 
-        <div className="protocol-status">
-          <StatusDot />
-          EXECUTION ENGINE ONLINE
-        </div>
-      </div>
-
-      <div className="pipeline">
-        {stages.map((item, index) => (
-          <button
-            key={item.number}
-            className={`pipeline-stage ${active === index ? "active" : ""} ${
-              index < active ? "complete" : ""
-            }`}
-            onClick={() => setActive(index)}
-          >
-            <div className="pipeline-number">{item.number}</div>
-            <div className="pipeline-icon">{item.icon}</div>
-            <div>
-              <small>{item.short}</small>
-              <strong>{item.name}</strong>
+        <div className="resolution-trace">
+          {[
+            ["01", "SCHEDULER", "JOB TRIGGERED", "12:40:51"],
+            ["02", "TEE", "EXECUTION VERIFIED", "12:40:53"],
+            ["03", "HTTP", "DATA RECEIVED", "price: 4126"],
+            ["04", "jq", "VALUE EXTRACTED", ".price → 4126"],
+            ["05", "COMPARATOR", "CONDITION TRUE", "4126 ≥ 4000"],
+          ].map(([number, name, event, detail]) => (
+            <div className="trace-row" key={number}>
+              <span>{number}</span>
+              <strong>{name}</strong>
+              <div>
+                <b>{event}</b>
+                <small>{detail}</small>
+              </div>
             </div>
-            {index < stages.length - 1 && <span className="pipeline-arrow">→</span>}
-          </button>
-        ))}
-      </div>
+          ))}
 
-      <div className="execution-console">
-        <div className="console-header">
-          <div>
-            <span className="console-label">PROTOCOL EXECUTION</span>
-            <strong>MARKET #001 · RESOLUTION JOB</strong>
-          </div>
-          <span className="processing">
-            <StatusDot /> PROCESSING
-          </span>
-        </div>
-
-        <div className="console-body">
-          <div className="console-stage">
-            <span className="big-stage-icon">{stage.icon}</span>
-            <div>
-              <span>STEP {stage.number}</span>
-              <h3>{stage.name}</h3>
-              <p>{stage.description}</p>
-            </div>
-          </div>
-
-          <div className="console-data">
-            <div>
-              <span>INPUT</span>
-              <code>
-                {active === 0
-                  ? "scheduler.trigger()"
-                  : active === 1
-                    ? "trusted.execute(job)"
-                    : active === 2
-                      ? "GET /api/eth"
-                      : active === 3
-                        ? ".price"
-                        : active === 4
-                          ? "4126 >= 4000"
-                          : active === 5
-                            ? "OUTCOME.YES"
-                            : "settle(position)"}
-              </code>
-            </div>
-            <div>
-              <span>STATUS</span>
-              <strong className="success">SUCCESS</strong>
-            </div>
-          </div>
-        </div>
-
-        <div className="console-log">
-          <span>12:41:03</span>
-          <span className="log-ok">✓</span>
-          <span>{stage.description}</span>
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function ActivitySection() {
-  return (
-    <section id="activity" className="section activity-section">
-      <div className="section-heading compact">
-        <div>
-          <div className="section-number">03 / ACTIVITY</div>
-          <h2>Market activity.</h2>
-        </div>
-        <span className="live-label">
-          <StatusDot /> LIVE SIMULATION
-        </span>
-      </div>
-
-      <div className="activity-table">
-        <div className="activity-head">
-          <span>MARKET</span>
-          <span>SIDE</span>
-          <span>SIZE</span>
-          <span>TIME</span>
-        </div>
-
-        {activity.map(([market, side, size, time]) => (
-          <div className="activity-row" key={`${market}-${time}`}>
-            <strong>{market}</strong>
-            <span className={side === "YES" ? "side-yes" : "side-no"}>
-              {side}
-            </span>
-            <span>{size}</span>
-            <span>{time}</span>
-          </div>
-        ))}
-      </div>
-    </section>
-  );
-}
-
-function ResolutionSection() {
-  return (
-    <section className="section resolution-section">
-      <div className="resolution-card">
-        <div className="resolution-top">
-          <div>
-            <span className="section-number">04 / RECENT RESOLUTION</span>
-            <h2>ETH price ≥ $4,000</h2>
-          </div>
-          <span className="resolved-badge">
-            <StatusDot active={false} /> RESOLVED
-          </span>
-        </div>
-
-        <div className="resolution-grid">
-          <div className="resolution-step">
-            <span>01</span>
-            <small>SCHEDULER</small>
-            <strong>JOB TRIGGERED</strong>
-            <em>12:40:51</em>
-          </div>
-
-          <div className="resolution-step">
-            <span>02</span>
-            <small>TEE</small>
-            <strong>EXECUTION VERIFIED</strong>
-            <em>12:40:53</em>
-          </div>
-
-          <div className="resolution-step">
-            <span>03</span>
-            <small>HTTP</small>
-            <strong>DATA RECEIVED</strong>
-            <em>price: 4126</em>
-          </div>
-
-          <div className="resolution-step">
-            <span>04</span>
-            <small>jq</small>
-            <strong>VALUE EXTRACTED</strong>
-            <em>.price → 4126</em>
-          </div>
-
-          <div className="resolution-step">
-            <span>05</span>
-            <small>COMPARATOR</small>
-            <strong>CONDITION TRUE</strong>
-            <em>4126 ≥ 4000</em>
-          </div>
-
-          <div className="resolution-final">
-            <small>FINAL OUTCOME</small>
+          <div className="final-outcome">
+            <span>FINAL OUTCOME</span>
             <strong>YES</strong>
-            <span>Settlement eligible</span>
+            <small>Settlement eligible</small>
           </div>
         </div>
-      </div>
-    </section>
-  );
-}
+      </section>
 
-function Footer() {
-  return (
-    <footer id="about" className="footer">
-      <div className="footer-main">
-        <div>
-          <a href="#" className="brand">
-            <span className="brand-mark">R</span>
-            <span>
-              <strong>RitualPredict</strong>
-              <small>Prediction Markets</small>
-            </span>
-          </a>
-          <p>
-            Programmable prediction-market infrastructure demonstrating
-            deterministic resolution through external data.
-          </p>
+      <footer className="footer">
+        <div className="footer-brand">
+          <span className="brand-mark">R</span>
+          <div>
+            <strong>RitualPredict</strong>
+            <span>Prediction market architecture</span>
+          </div>
         </div>
+
+        <p>
+          Programmable prediction-market infrastructure demonstrating
+          deterministic resolution through external data.
+        </p>
 
         <div className="footer-links">
-          <div>
-            <span>PRODUCT</span>
-            <a href="#markets">Markets</a>
-            <a href="#activity">Activity</a>
-            <a href="#protocol">Protocol</a>
-          </div>
-          <div>
-            <span>TECHNOLOGY</span>
-            <a href="#protocol">Scheduler</a>
-            <a href="#protocol">TEE</a>
-            <a href="#protocol">Resolution</a>
-          </div>
+          <a href="#markets">Markets</a>
+          <a href="#protocol">Protocol</a>
+          <a href="#activity">Activity</a>
+          <a
+            href="https://ritual-chain-workshop-2-njyc-inky.vercel.app/"
+            target="_blank"
+            rel="noreferrer"
+          >
+            Live site ↗
+          </a>
         </div>
-      </div>
 
-      <div className="footer-bottom">
-        <span>RITUAL CHAIN ACADEMY PROJECT</span>
-        <span>SIMULATION · NO LIVE CONTRACT</span>
-        <span>© 2026 RitualPredict</span>
-      </div>
-    </footer>
-  );
-}
-
-export default function Page() {
-  return (
-    <>
-      <Header />
-
-      <main>
-        <Hero />
-        <Stats />
-        <MarketsSection />
-        <ProtocolSection />
-        <ActivitySection />
-        <ResolutionSection />
-      </main>
-
-      <Footer />
-    </>
+        <div className="footer-bottom">
+          <span>RITUAL CHAIN ACADEMY PROJECT</span>
+          <span>SIMULATION · NO LIVE CONTRACT</span>
+          <span>© 2026 RitualPredict</span>
+        </div>
+      </footer>
+    </main>
   );
 }
