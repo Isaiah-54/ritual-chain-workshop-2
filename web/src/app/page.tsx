@@ -272,17 +272,17 @@ export default function Home() {
               </div>
             </div>
 
-            <div className="rounded-xl border border-[var(--line)] bg-black/30 p-3 mono text-[11px] text-[var(--muted)] space-y-0.5">
-              <div>oracle: {selected.oracleUrl}</div>
-              <div>path: {selected.jsonPath}</div>
+            <div className="rounded-xl border border-[var(--line)] bg-black/30 p-3 mono text-[11px] space-y-1">
+              <div><span className="text-[var(--muted)]">oracle:</span> <span className="text-[var(--text)]">{selected.oracleUrl}</span></div>
+              <div><span className="text-[var(--muted)]">path:</span> <span className="text-[var(--text)]">{selected.jsonPath}</span></div>
               <div>
-                rule: {selected.comparator} {selected.target}
+                <span className="text-[var(--muted)]">rule:</span> <span className="text-[var(--text)]">{selected.comparator} {selected.target}</span>
               </div>
               {selected.observedValue != null && (
-                <div>observed: {selected.observedValue}</div>
+                <div><span className="text-[var(--muted)]">observed:</span> <span className="text-[var(--teal)]">{selected.observedValue}</span></div>
               )}
               {selected.invalidReason && (
-                <div className="text-[var(--rose)]">invalid: {selected.invalidReason}</div>
+                <div><span className="text-[var(--muted)]">invalid:</span> <span className="text-[var(--rose)]">{selected.invalidReason}</span></div>
               )}
             </div>
 
@@ -360,7 +360,7 @@ export default function Home() {
                 />
                 <button
                   type="button"
-                  className="w-full rounded-xl border border-[var(--line)] py-3 text-sm transition hover:border-white/20"
+                  className="w-full rounded-xl border border-[var(--line)] py-3 text-sm font-medium text-[var(--text)] transition hover:border-[var(--teal)]/50 hover:text-[var(--teal)]"
                   onClick={() => {
                     const winningPool =
                       selected.outcome === "Yes" ? selected.totalYes : selected.totalNo;
@@ -389,7 +389,7 @@ export default function Home() {
                 />
                 <button
                   type="button"
-                  className="w-full rounded-xl border border-[var(--line)] py-3 text-sm transition hover:border-white/20"
+                  className="w-full rounded-xl border border-[var(--line)] py-3 text-sm font-medium text-[var(--text)] transition hover:border-[var(--teal)]/50 hover:text-[var(--teal)]"
                   onClick={() =>
                     setSimMessage(
                       stakeNum > 0
