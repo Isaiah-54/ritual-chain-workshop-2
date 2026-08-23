@@ -13,60 +13,60 @@ const eth = (n: number) => BigInt(Math.round(n * 1e18));
 // In-memory demo markets. Same shape as the real on-chain Market struct.
 let markets: Market[] = [
   {
-    id: 1n,
+    id: BigInt(1),
     creator: fakeAddr(1),
     question: "Will ETH close above $4,000 by Friday?",
     oracleUrl: "https://api.example.com/eth-price",
     jsonPath: "price",
-    target: 4000n,
+    target: BigInt(4000),
     comparator: Comparator.GTE,
-    closeBlock: 128400n,
-    resolveBlock: 128520n,
-    scheduleId: 1n,
+    closeBlock: BigInt(128400),
+    resolveBlock: BigInt(128520),
+    scheduleId: BigInt(1),
     totalYes: eth(3.4),
     totalNo: eth(1.9),
     state: MarketState.Open,
     outcome: Outcome.Unresolved,
     attempts: 0,
-    observedValue: 0n,
+    observedValue: BigInt(0),
     invalidReason: "",
   },
   {
-    id: 2n,
+    id: BigInt(2),
     creator: fakeAddr(2),
     question: "Will the testnet stay up through the workshop?",
     oracleUrl: "https://status.ritualfoundation.org/uptime",
     jsonPath: "uptimePct",
-    target: 95n,
+    target: BigInt(95),
     comparator: Comparator.GTE,
-    closeBlock: 128000n,
-    resolveBlock: 128100n,
-    scheduleId: 2n,
+    closeBlock: BigInt(128000),
+    resolveBlock: BigInt(128100),
+    scheduleId: BigInt(2),
     totalYes: eth(0.8),
     totalNo: eth(2.6),
     state: MarketState.Resolved,
     outcome: Outcome.No,
     attempts: 1,
-    observedValue: 41n,
+    observedValue: BigInt(41),
     invalidReason: "",
   },
   {
-    id: 3n,
+    id: BigInt(3),
     creator: fakeAddr(3),
     question: "Will BTC dominance exceed 60%?",
     oracleUrl: "https://api.example.com/btc-dominance",
     jsonPath: "dominance",
-    target: 60n,
+    target: BigInt(60),
     comparator: Comparator.GT,
-    closeBlock: 127500n,
-    resolveBlock: 127600n,
-    scheduleId: 3n,
+    closeBlock: BigInt(127500),
+    resolveBlock: BigInt(127600),
+    scheduleId: BigInt(3),
     totalYes: eth(1.1),
     totalNo: eth(1.1),
     state: MarketState.Invalid,
     outcome: Outcome.Unresolved,
     attempts: 3,
-    observedValue: 0n,
+    observedValue: BigInt(0),
     invalidReason: "Oracle endpoint unreachable after max retries.",
   },
 ];
@@ -90,10 +90,10 @@ export async function getStakes(marketId: bigint, account: `0x${string}`): Promi
   await delay(150);
   return (
     stakesStore[key(marketId, account)] ?? {
-      yes: 0n,
-      no: 0n,
+      yes: BigInt(0),
+      no: BigInt(0),
       alreadySettled: false,
-      claimable: 0n,
+      claimable: BigInt(0),
     }
   );
 }
@@ -126,7 +126,7 @@ export async function placeBet(
   else m.totalNo += amount;
 
   const k = key(marketId, account);
-  const s = stakesStore[k] ?? { yes: 0n, no: 0n, alreadySettled: false, claimable: 0n };
+  const s = stakesStore[k] ?? { yes: BigInt(0), no: BigInt(0), alreadySettled: false, claimable: BigInt(0) };
   if (isYes) s.yes += amount;
   else s.no += amount;
   stakesStore[k] = s;
@@ -136,15 +136,15 @@ export async function claimWinnings(account: `0x${string}`, marketId: bigint) {
   await delay(600);
   const k = key(marketId, account);
   const s = stakesStore[k];
-  if (!s || s.alreadySettled || s.claimable === 0n) throw new Error("Nothing to claim.");
+  if (!s || s.alreadySettled || s.claimable === BigInt(0)) throw new Error("Nothing to claim.");
   s.alreadySettled = true;
-  s.claimable = 0n;
+  s.claimable = BigInt(0);
 }
 
 export async function claimRefund(account: `0x${string}`, marketId: bigint) {
   await delay(600);
   const k = key(marketId, account);
-  const s = stakesStore[k] ?? { yes: 0n, no: 0n, alreadySettled: false, claimable: 0n };
+  const s = stakesStore[k] ?? { yes: BigInt(0), no: BigInt(0), alreadySettled: false, claimable: BigInt(0) };
   if (s.alreadySettled) throw new Error("Already settled.");
   s.alreadySettled = true;
   stakesStore[k] = s;
@@ -174,15 +174,15 @@ export async function createMarket(
       jsonPath: params.jsonPath,
       target: params.target,
       comparator: params.comparator,
-      closeBlock: 0n,
-      resolveBlock: 0n,
+      closeBlock: BigInt(0),
+      resolveBlock: BigInt(0),
       scheduleId: id,
-      totalYes: 0n,
-      totalNo: 0n,
+      totalYes: BigInt(0),
+      totalNo: BigInt(0),
       state: MarketState.Open,
       outcome: Outcome.Unresolved,
       attempts: 0,
-      observedValue: 0n,
+      observedValue: BigInt(0),
       invalidReason: "",
     },
   ];
