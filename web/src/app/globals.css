@@ -14,25 +14,52 @@
   --amber: #f0b429;
   --rose: #f07178;
   --green: #5ddea3;
+
+  --font-heading: var(--font-space-grotesk), ui-sans-serif, system-ui, sans-serif;
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
 
 html, body {
   background: var(--bg);
   color: var(--text);
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-family: var(--font-sans);
+}
+
+h1, h2, h3, h4, .heading {
+  font-family: var(--font-heading);
+  letter-spacing: -0.01em;
+}
+
+/* subtle vignette + grid so the page never feels flat black */
+body {
+  background:
+    radial-gradient(ellipse 900px 500px at 15% -10%, rgba(62, 224, 197, 0.10), transparent 60%),
+    radial-gradient(ellipse 700px 500px at 100% 0%, rgba(155, 140, 255, 0.08), transparent 55%),
+    var(--bg);
+  background-attachment: fixed;
 }
 
 .grid-bg {
   background-image:
-    linear-gradient(rgba(62, 224, 197, 0.04) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(62, 224, 197, 0.04) 1px, transparent 1px);
+    linear-gradient(rgba(62, 224, 197, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(62, 224, 197, 0.05) 1px, transparent 1px);
   background-size: 48px 48px;
+  background-position: center top;
+  mask-image: linear-gradient(180deg, black, black 60%, transparent 100%);
 }
 
 .panel {
   background: linear-gradient(180deg, var(--panel-2), var(--panel));
   border: 1px solid var(--line);
   border-radius: 16px;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 20px 40px -24px rgba(0, 0, 0, 0.6);
+  transition: border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
+}
+
+.panel-hover:hover {
+  border-color: rgba(62, 224, 197, 0.35);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 24px 48px -20px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(62, 224, 197, 0.08);
+  transform: translateY(-1px);
 }
 
 .pill {
@@ -44,6 +71,60 @@ html, body {
   border: 1px solid var(--line);
 }
 
+.pill-glow {
+  border: 1px solid rgba(62, 224, 197, 0.35);
+  background: rgba(62, 224, 197, 0.08);
+  color: var(--teal);
+  box-shadow: 0 0 0 1px rgba(62, 224, 197, 0.06), 0 0 24px -8px rgba(62, 224, 197, 0.45);
+}
+
 .mono {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+/* gradient text for hero headlines */
+.text-gradient {
+  background: linear-gradient(120deg, var(--text) 20%, var(--teal) 55%, var(--violet) 90%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* soft glow ring you can drop behind a hero panel */
+.glow-ring {
+  position: relative;
+}
+.glow-ring::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(135deg, rgba(62, 224, 197, 0.5), rgba(155, 140, 255, 0.3), transparent 60%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+}
+
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.fade-up {
+  animation: fade-up 480ms ease both;
+}
+
+.fade-up-1 { animation-delay: 60ms; }
+.fade-up-2 { animation-delay: 120ms; }
+.fade-up-3 { animation-delay: 180ms; }
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+.pulse-dot {
+  animation: pulse-dot 1.8s ease-in-out infinite;
 }
