@@ -59,6 +59,7 @@ export default function Home() {
   const [selected, setSelected] = useState<Market>(MARKETS[0] ?? MARKETS[1]);
   const [side, setSide] = useState<"YES" | "NO">("YES");
   const [stake, setStake] = useState("0.5");
+  const [simMessage, setSimMessage] = useState<string | null>(null);
 
   const list = useMemo(
     () => (filter === "ALL" ? MARKETS : MARKETS.filter((m) => m.state === filter)),
@@ -339,7 +340,9 @@ export default function Home() {
                       : "bg-[var(--violet)] text-black"
                   }`}
                   onClick={() =>
-                    alert("Simulation only — live path would call bet(marketId, isYes).")
+                    setSimMessage(
+                      `bet(${selected.id}, ${side === "YES"}) → staked ${stakeNum.toFixed(3)} ETH on ${side}. Projected payout if ${side} wins: ~${projectedPayout.toFixed(3)} ETH`,
+                    )
                   }
                 >
                   Simulate {side} bet
@@ -348,29 +351,67 @@ export default function Home() {
             )}
 
             {selected.state === "Resolved" && (
-              <button
-                type="button"
-                className="w-full rounded-xl border border-[var(--line)] py-3 text-sm transition hover:border-white/20"
-                onClick={() => alert("Simulation of claimWinnings(marketId)")}
-              >
-                Simulate claimWinnings
-              </button>
+              <>
+                <input
+                  value={stake}
+                  onChange={(e) => setStake(e.target.value)}
+                  className="w-full rounded-xl border border-[var(--line)] bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-[var(--teal)]/50"
+                  placeholder="Your stake on the winning side (ETH)"
+                />
+                <button
+                  type="button"
+                  className="w-full rounded-xl border border-[var(--line)] py-3 text-sm transition hover:border-white/20"
+                  onClick={() => {
+                    const winningPool =
+                      selected.outcome === "Yes" ? selected.totalYes : selected.totalNo;
+                    const totalPool = selected.totalYes + selected.totalNo;
+                    const payout =
+                      winningPool > 0 ? (stakeNum * totalPool) / winningPool : 0;
+                    setSimMessage(
+                      payout > 0
+                        ? `claimWinnings(${selected.id}) → ${payout.toFixed(3)} ETH (assumes ${stakeNum} ETH staked on the winning ${selected.outcome} side, stake × pool ÷ winning pool)`
+                        : `claimWinnings(${selected.id}) → 0 ETH (no stake on the winning side, or nothing to claim)`,
+                    );
+                  }}
+                >
+                  Simulate claimWinnings
+                </button>
+              </>
             )}
 
             {selected.state === "Invalid" && (
-              <button
-                type="button"
-                className="w-full rounded-xl border border-[var(--line)] py-3 text-sm transition hover:border-white/20"
-                onClick={() => alert("Simulation of claimRefund(marketId)")}
-              >
-                Simulate claimRefund
-              </button>
+              <>
+                <input
+                  value={stake}
+                  onChange={(e) => setStake(e.target.value)}
+                  className="w-full rounded-xl border border-[var(--line)] bg-black/40 px-3 py-2.5 text-sm outline-none focus:border-[var(--teal)]/50"
+                  placeholder="Your stake (ETH)"
+                />
+                <button
+                  type="button"
+                  className="w-full rounded-xl border border-[var(--line)] py-3 text-sm transition hover:border-white/20"
+                  onClick={() =>
+                    setSimMessage(
+                      stakeNum > 0
+                        ? `claimRefund(${selected.id}) → ${stakeNum.toFixed(3)} ETH refunded (exact stake returned, no payout multiplier)`
+                        : `claimRefund(${selected.id}) → 0 ETH (enter a stake above to simulate a refund)`,
+                    )
+                  }
+                >
+                  Simulate claimRefund
+                </button>
+              </>
             )}
 
             <div className="text-[11px] text-[var(--muted)]">
               Pool <span className="text-white">{pool.toFixed(2)} ETH</span> · YES{" "}
               <span className="text-[var(--teal)]">{yesPct}%</span>
             </div>
+            {simMessage && (
+              <div className="rounded-xl border border-[var(--teal)]/30 bg-[var(--teal)]/5 px-3 py-2.5 text-[11px] leading-relaxed text-[var(--teal)]">
+                {simMessage}
+              </div>
+            )}
           </aside>
         </div>
       </div>
