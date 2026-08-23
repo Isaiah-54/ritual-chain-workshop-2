@@ -110,13 +110,13 @@ export default function Home() {
             </p>
 
             <div className="mt-8 flex flex-wrap gap-3">
-              
+              <a
                 href="#markets"
                 className="rounded-full bg-[var(--teal)] px-5 py-2.5 text-sm font-semibold text-black transition hover:brightness-110"
               >
                 Browse markets
               </a>
-              
+              <a
                 href="/how-it-works"
                 className="rounded-full border border-[var(--line)] px-5 py-2.5 text-sm transition hover:border-[var(--teal)]/50 hover:text-[var(--teal)]"
               >
@@ -376,7 +376,7 @@ export default function Home() {
       </div>
 
       <footer className="border-t border-[var(--line)] px-4 py-8 text-center text-[11px] text-[var(--muted)]">
-        
+        <a
           href={PROOF.github}
           target="_blank"
           rel="noreferrer"
