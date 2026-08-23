@@ -61,7 +61,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               >
                 Verified
               </Link>
-              
+              <a
                 href="https://github.com/Isaiah-54/ritual-chain-workshop-2"
                 target="_blank"
                 rel="noreferrer"
